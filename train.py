@@ -524,11 +524,13 @@ if __name__ == "__main__":
     # --- Optim
     optim = AdamW([p for p in agent.parameters() if p.requires_grad],
                   lr=cfg.lr, weight_decay=cfg.weight_decay)
-    scaler = torch.cpu.amp.GradScaler(enabled=cfg.amp)
+    use_amp = cfg.amp and torch.cuda.is_available()
+    scaler = torch.amp.GradScaler(cfg.device, enabled=use_amp)
 
     step = 0
     agent.train()
-
+    avg_losses = []
+    avg_loss = 0
     while step < cfg.max_steps:
         for item in dl:
             step += 1
@@ -547,10 +549,8 @@ if __name__ == "__main__":
             curr_time = dev(item.curr_time)
 
             optim.zero_grad(set_to_none=True)
-            use_amp = cfg.amp and torch.cuda.is_available()
-            scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with torch.amp.autocast(cfg.device, enabled=use_amp):
 
                 pred_pn_denoising_dir, noisy_actions = agent.forward(
                     curr_agent_info,
@@ -575,7 +575,9 @@ if __name__ == "__main__":
             scaler.update()
 
             if step % cfg.log_every == 0:
-                print(f"[step {step:6d}] loss={loss.item():.4f}")
+                avg_losses.append((step, avg_loss/cfg.log_every))
+                print(f"[step {step:6d}] loss={avg_loss/cfg.log_every:.4f}")
+                avg_loss = 0
 
             if step % cfg.ckpt_every == 0:
                 ckpt = {
@@ -584,7 +586,7 @@ if __name__ == "__main__":
                     "optim": optim.state_dict(),
                     "cfg": cfg.__dict__,
                 }
-                path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pt")
+                path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pth")
                 torch.save(ckpt, path)
                 print(f"Saved checkpoint to {path}")
 
