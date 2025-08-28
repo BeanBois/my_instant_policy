@@ -229,7 +229,7 @@ def build_action_heterodata_single(
     act_flat = pred_agent_emb.reshape(T * A, D)
     data['act'].x = act_flat                               # [T*A, D]
     pred_agent_pos_flat = pred_agent_pos.reshape(T*A, 2)
-    data['act'].x = pred_agent_pos_flat                               # [T*A, 2]
+    data['act'].pos = pred_agent_pos_flat                               # [T*A, 2]
 
 
     def act_idx(t, a):  # 0<=t<T, 0<=a<A
