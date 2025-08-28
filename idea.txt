@@ -1,0 +1,40 @@
+Basically this is my approach to In context Imitation learning
+
+Given inputs:
+    curr_agent_info, # [B x self.num_agent_nodes x 6] x, y, theta, state, time, done
+    curr_object_pos, # [B x M x 2] x,y
+    demo_agent_info, # [B x N x L x self.num_agent_nodes x 6] x, y, theta, state, time, done
+    demo_object_pos, # [B x N x L x M x 2]
+
+Given demo_agent_info, # [B x N x L x self.num_agent_nodes x 6] x, y, theta, state, time, done
+First i want to process demos. The big idea here is to cluster demos, then 
+construct hyp_embeddings for them using SK constructor (paper 1), then perform intra/inter level(paper 2) 
+message parsing between them so that embeddings are temporally aware of its neighbourhood
+
+an example of the clustering can be seen below: 
+    # after clustering from theta1 1 : (2,3,4,5,6) & 7 : (8,9,10,11,12)
+    # after clustering from theta2 2 : (3) & 4 : (5,6) &  8: (9) & 10 : (11,12)
+
+    # clustering is done based on 2 conditions
+        # if next proceeding agent_info state has changed, then the next_proceeding obs becomes new parent
+        # else if abs(angle_parent - angle_next) > angular_granulity, then it becomes new parent
+    # the desired tree is as such 
+    #                   empty root 
+    #                  /         \
+    #                 1           7
+    #                / \         / \
+    #               2-> 4        8 -> 10
+    #              /.  /  \.     |.  |   \
+    #             3.  5. -> 6.    9.  11-> 12
+
+    # then from this tree i want to encode use SK constructor to construct PC embeddings of hyp_dim
+    # you can do this in pytorch
+
+    Essentially this module will be called the demo_handler and it will take in 
+    (demo_agent_info) of shape [B,N,L,A,6] and output [B,N,L,hyp_dim = 2]. Note that each demo-frame gets mapped to a singular embedding from SK_constructor
+
+Then i will perform Rho(.) from instant_policy (paper 3) that encodes local geometrical data. This i already have so ignore this 
+
+
+    
+    
