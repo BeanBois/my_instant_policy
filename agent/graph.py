@@ -254,14 +254,14 @@ def build_action_heterodata_single(
     ei = torch.stack([src_curr, dst_act], dim=0)
     data[('curr', 'to', 'act')].edge_index = ei
     rel = data['act'].pos[ei[1]] - data['act'].pos[ei[0]]
-    data[('act','temporal','act')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
+    data[('curr', 'to', 'act')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
 
     src_act = torch.arange(Na).repeat_interleave(A)
     dst_curr = torch.arange(A).repeat(Na)
     ei = torch.stack([src_act, dst_curr], dim=0)
     data[('act', 'to', 'curr')].edge_index = ei
     rel = data['act'].pos[ei[1]] - data['act'].pos[ei[0]]
-    data[('act','temporal','act')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
+    data[('act', 'to', 'curr')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
     return data
 
 def build_action_graph_batch(
