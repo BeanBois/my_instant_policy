@@ -42,7 +42,7 @@ class Phi(nn.Module):
         for layer in self.layers:
             # edge_attr_dict = {rel: data[rel].edge_attr for rel in data.edge_types if 'edge_attr' in data[rel]} done need edge emb for all types of edges
             edge_attr_dict = {
-                ('demo','temporal','demo'): data[('demo','temporal','demo')].edge_attr
+                ('demo','temporal','demo'): data[('demo','temporal','demo')].edge_attrs
             }
             x = layer(x, data.edge_index_dict, edge_attr_dict)
             for t in x:
