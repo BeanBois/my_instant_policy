@@ -108,3 +108,133 @@ def build_local_heterodata_batch(
         )
         data_list.append(d)
     return HeteroBatch.from_data_list(data_list)
+
+def build_context_heterodata_single(
+    curr_agent_emb: Tensor,       # [A, D]
+    demo_agent_emb: Tensor,       # [N, L, A, D]
+) -> HeteroData:
+    """
+    Nodes:
+      - 'curr': A nodes with features = curr_agent_emb
+      - 'demo': N*L*A nodes with features = flattened demo_agent_emb
+    Edges:
+      - ('demo','temporal','demo'): within each demo & keypoint, connect l -> l+1
+      - ('demo','to','curr') and ('curr','to','demo'): full bipartite (structured cross-attn)
+    """
+    A, D = curr_agent_emb.shape
+    N, L, A2, D2 = demo_agent_emb.shape
+    assert A == A2 and D == D2
+
+    data = HeteroData()
+    # node features
+    data['curr'].x = curr_agent_emb          # [A, D]
+    demo_flat = demo_agent_emb.reshape(N * L * A, D)
+    data['demo'].x = demo_flat               # [N*L*A, D]
+
+    # helper to index (n,l,a) in flattened 'demo'
+    def demo_idx(n, l, a):  # 0<=n<N, 0<=l<L, 0<=a<A
+        return (n * L + l) * A + a
+
+    # temporal edges in demo: (n, l, a) -> (n, l+1, a)
+    if L > 1:
+        src_t, dst_t = [], []
+        for n in range(N):
+            for a in range(A):
+                for l in range(L - 1):
+                    src_t.append(demo_idx(n, l, a))
+                    dst_t.append(demo_idx(n, l + 1, a))
+        ei_demo_temporal = torch.tensor([src_t, dst_t], dtype=torch.long)
+        data[('demo', 'temporal', 'demo')].edge_index = ei_demo_temporal
+
+    # demo <-> curr: full bipartite
+    Nd = N * L * A
+    src_demo = torch.arange(Nd).repeat_interleave(A)
+    dst_curr = torch.arange(A).repeat(Nd)
+    ei_demo_to_curr = torch.stack([src_demo, dst_curr], dim=0)
+    data[('demo', 'to', 'curr')].edge_index = ei_demo_to_curr
+
+    src_curr = torch.arange(A).repeat_interleave(Nd)
+    dst_demo = torch.arange(Nd).repeat(A)
+    ei_curr_to_demo = torch.stack([src_curr, dst_demo], dim=0)
+    data[('curr', 'to', 'demo')].edge_index = ei_curr_to_demo
+
+    return data
+
+
+def build_context_graph_batch(
+    curr_agent_emb: Tensor,   # [B, A, D]
+    demo_agent_emb: Tensor,   # [B, N, L, A, D]
+) -> HeteroBatch:
+    B, A, D = curr_agent_emb.shape
+    Bb, N, L, Aa, Dd = demo_agent_emb.shape
+    assert B == Bb and A == Aa and D == Dd
+
+    data_list: List[HeteroData] = []
+    for b in range(B):
+        d = build_context_heterodata_single(
+            curr_agent_emb[b],       # [A, D]
+            demo_agent_emb[b],       # [N, L, A, D]
+        )
+        data_list.append(d)
+    return HeteroBatch.from_data_list(data_list)
+
+
+def build_action_heterodata_single(
+    curr_agent_ctx: Tensor,   # [A, D] (ϕ-aligned current)
+    pred_agent_emb: Tensor,   # [T, A, D] (ρ over predicted obs/agents per future step)
+) -> HeteroData:
+    """
+    Nodes:
+      - 'curr': A nodes with context-aligned features
+      - 'act':  T*A nodes (concatenate over T) with per-time gripper-node embeddings
+    Edges:
+      - ('act','temporal','act'): for each keypoint a, connect t -> t+1
+      - ('curr','to','act') and ('act','to','curr'): full bipartite
+    """
+    A, D = curr_agent_ctx.shape
+    T, A2, D2 = pred_agent_emb.shape
+    assert A == A2 and D == D2
+
+    data = HeteroData()
+    data['curr'].x = curr_agent_ctx                        # [A, D]
+    act_flat = pred_agent_emb.reshape(T * A, D)
+    data['act'].x = act_flat                               # [T*A, D]
+
+    def act_idx(t, a):  # 0<=t<T, 0<=a<A
+        return t * A + a
+
+    if T > 1:
+        src_t, dst_t = [], []
+        for a in range(A):
+            for t in range(T - 1):
+                src_t.append(act_idx(t, a))
+                dst_t.append(act_idx(t + 1, a))
+        ei_act_temporal = torch.tensor([src_t, dst_t], dtype=torch.long)
+        data[('act', 'temporal', 'act')].edge_index = ei_act_temporal
+
+    Na = T * A
+    # curr <-> act full bipartite
+    src_curr = torch.arange(A).repeat_interleave(Na)
+    dst_act  = torch.arange(Na).repeat(A)
+    data[('curr', 'to', 'act')].edge_index = torch.stack([src_curr, dst_act], dim=0)
+
+    src_act = torch.arange(Na).repeat_interleave(A)
+    dst_curr = torch.arange(A).repeat(Na)
+    data[('act', 'to', 'curr')].edge_index = torch.stack([src_act, dst_curr], dim=0)
+
+    return data
+
+
+def build_action_graph_batch(
+    curr_agent_ctx: Tensor,   # [B, A, D]
+    pred_agent_emb: Tensor,   # [B, T, A, D]
+) -> HeteroBatch:
+    B, A, D = curr_agent_ctx.shape
+    Bb, T, Aa, Dd = pred_agent_emb.shape
+    assert B == Bb and A == Aa and D == Dd
+
+    data_list: List[HeteroData] = []
+    for b in range(B):
+        d = build_action_heterodata_single(curr_agent_ctx[b], pred_agent_emb[b])
+        data_list.append(d)
+    return HeteroBatch.from_data_list(data_list)

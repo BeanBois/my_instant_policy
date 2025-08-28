@@ -5,8 +5,10 @@ from utilities import *
 
 # aux
 from .demo_handler import DemoHandler
-from .graph import build_local_heterodata_batch
+from .graph import build_local_heterodata_batch, build_action_graph_batch, build_context_graph_batch
 from .rho import Rho 
+from .psi import Psi
+from .phi import Phi
 from .foresight import PsiForesight
 from .pma import ProductManifoldAttention
 from .action_head import ProductManifoldGPHead, SimpleActionHead
@@ -39,9 +41,13 @@ class Policy(nn.Module):
             use_agent_agent = False
         )
 
-        self.psi = Phi()
+        self.psi = Phi(
+            dim=self.euc_dim
+        )
 
-        self.psi = Psi()
+        self.psi = Psi(
+            dim=self.euc_dim
+        )
 
         self.action_head = SimpleActionHead(
             in_dim=self.euc_dim,
@@ -159,7 +165,7 @@ class Policy(nn.Module):
         flat_pred_rho_batch = pred_node_emb['agent'] # [B*T, num_agent_nodes, self.euc_dim]
         pred_rho_batch = flat_pred_rho_batch.view(B,T, num_agent_nodes,-1) # [B, T, A, de]
 
-        action_graph = build_action_graph(
+        action_graph = build_action_graph_batch(
             curr_agent_emb = curr_agent_emb_context_aligned_batch, # [B, A, de]
             pred_agent_emb = pred_rho_batch # [B, T, A, de]
         )
