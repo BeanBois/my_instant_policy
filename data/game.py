@@ -3,13 +3,24 @@ from .game_aux import *
 import random
 import json
 import os
+from .game_obj import GameDifficulty, make_objective_strategy, GameObjective
 
 class Game:
     
-    def __init__(self, num_edibles = NUM_OF_EDIBLE_OBJECT, num_obstacles = NUM_OF_OBSTACLES, num_goals = NUM_OF_GOALS, screen_width = SCREEN_WIDTH, screen_height = SCREEN_HEIGHT, objective = None, player_start_pos = (PLAYER_START_X, PLAYER_START_Y)):
+    def __init__(
+        self, 
+        objective: GameObjective = None, 
+        difficulty: GameDifficulty  = None,
+        objective_cfg = None, 
+        num_edibles : int= NUM_OF_EDIBLE_OBJECT, 
+        num_obstacles : int= NUM_OF_OBSTACLES, 
+        screen_width = SCREEN_WIDTH, 
+        screen_height = SCREEN_HEIGHT,
+        player_start_pos = None
+        ):
+
         self.num_edibles = num_edibles
         self.num_obstacles = num_obstacles
-        self.num_goals = num_goals
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
@@ -18,54 +29,46 @@ class Game:
         
         # Initialize game objects
         self.player_start_pos = player_start_pos
+        if player_start_pos is None:
+            player_starting_pos_x =  np.random.randint(0 + Player.width ,self.screen_width - Player.width) 
+            player_starting_pos_y =  np.random.randint(0 + Player.height,self.screen_height - Player.height) 
+            self.player_start_pos = (player_starting_pos_x, player_starting_pos_y)
+
         self.player = Player(self.player_start_pos[0], self.player_start_pos[1])
         self.edibles = []
         self.obstacles = []
         self.goal = None
         
         # Game state
-        self.objective = objective  # "eat_all" or "reach_goal"
+        self.objective_strategy = None  # helper 
+        self.objective_cfg = objective_cfg
+        if self.objective_cfg is None:
+
+            offset = 100
+            random_target_x = random.random() * (self.screen_width - 2* offset) + offset 
+            random_target_y = random.random() * (self.screen_height - 2* offset) + offset 
+
+            self.objective_cfg = {
+                'difficulty' : difficulty,
+                'num_edibles' : self.num_edibles,
+                'num_obstacles' : self.num_obstacles,
+                'target' : (random_target_x, random_target_y)
+            }  
+
+        self.objective = None 
         self.game_over = False
         self.game_won = False
-        # self.font = pygame.font.Font(None, 36)
 
         self.setup_game()
 
     def setup_game(self):
         # Randomly choose objective
         if self.objective is None:
-            self.objective = random.choice([GameObjective.EAT_ALL, GameObjective.REACH_GOAL])
-        
-        # Create edible objects if objective is eat all edibles
-        if self.objective is GameObjective.EAT_ALL:
-            for _ in range(self.num_edibles):
-                x = random.randint(50, self.screen_width - 50)
-                y = random.randint(50, self.screen_height - 50)
-                # Make sure edibles don't spawn too close to player
-                while math.sqrt((x - self.player.x)**2 + (y - self.player.y)**2) < 100:
-                    x = random.randint(50, self.screen_width - 50)
-                    y = random.randint(50, self.screen_height - 50)
-                
-                width = random.randint(15, 25)
-                height = random.randint(15, 25)
-                self.edibles.append(EdibleObject(x, y, width, height))
-        
-        # Create obstacles and set goal position if objective is reach goal
-        if self.objective is GameObjective.REACH_GOAL:
-            for _ in range(self.num_obstacles):
-                x = random.randint(50, self.screen_width - 50)
-                y = random.randint(50, self.screen_height - 50)
-                # Make sure obstacles don't spawn too close to player
-                while math.sqrt((x - self.player.x)**2 + (y - self.player.y)**2) < 150:
-                    x = random.randint(50,  self.screen_width - 50)
-                    y = random.randint(50, self.screen_height - 50)
-                
-                width = random.randint(30, 50)
-                height = random.randint(30, 50)
-                self.obstacles.append(Obstacle(x, y, width, height))
-        
-            goal_position = (self.screen_width - 100 + np.random.randint(-25,25), self.screen_height - 100 + np.random.randint(-25,25))
-            self.goal = Goal(goal_position[0], goal_position[1])
+            self.objective = random.choice([objective for objective in GameObjective])
+
+
+
+        self.objective_strategy = make_objective_strategy(self, cfg=getattr(self, 'objective_cfg', None))
 
         # Command line print to inform player
         print("-" * 25)
@@ -89,12 +92,32 @@ class Game:
         if not self.game_over and not self.game_won:
             if keys[pygame.K_UP] or keys[pygame.K_w]:
                 self.player.move_forward()
+                if self.objective == GameObjective.PUSH_AND_PLACE:
+                    obj = self.edibles[0]
+                    in_contact = obj.eaten 
+                    if in_contact:
+                        obj.move_forward(self.player.angle)
             if keys[pygame.K_DOWN] or keys[pygame.K_s]:
                 self.player.move_backward()
+                if self.objective == GameObjective.PUSH_AND_PLACE:
+                    obj = self.edibles[0]
+                    in_contact = obj.eaten 
+                    if in_contact:
+                        obj.move_backward(self.player.angle)
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 self.player.rotate_left()
+                if self.objective == GameObjective.PUSH_AND_PLACE:
+                    obj = self.edibles[0]
+                    in_contact = obj.eaten 
+                    if in_contact:
+                        obj.rotate_left(self.player.size)
             if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
                 self.player.rotate_right()
+                if self.objective == GameObjective.PUSH_AND_PLACE:
+                    obj = self.edibles[0]
+                    in_contact = obj.eaten 
+                    if in_contact:
+                        obj.rotate_right(self.player.sizes)
 
         return True
 
@@ -109,45 +132,13 @@ class Game:
     def update(self):
         if self.game_over or self.game_won:
             return
+        self.objective_strategy.update(self)
+        self.game_won = self.objective_strategy.is_success(self)
         
-        # Check collision with obstacles
-        player_rect = self.player.get_rect()
-        for obstacle in self.obstacles:
-            if player_rect.colliderect(obstacle.get_rect()):
-                self.game_over = True
-                return
-        
-        # Check collision with edibles
-        for edible in self.edibles:
-            if not edible.eaten and player_rect.colliderect(edible.get_rect()) and self.player.state is PlayerState.EATING:
-                edible.eaten = True
-        
-        # Check win conditions
-        if self.objective == GameObjective.EAT_ALL:
-            if all(edible.eaten for edible in self.edibles):
-                self.game_won = True
-        elif self.objective == GameObjective.REACH_GOAL:
-            if self.goal:
-                goal_rect = self.goal.get_rect()
-                if player_rect.colliderect(goal_rect):
-                    self.game_won = True
-    
     def draw(self):
         self.screen.fill(WHITE)
-        
-        # Draw all game objects
-        for edible in self.edibles:
-            edible.draw(self.screen)
-        
-        for obstacle in self.obstacles:
-            obstacle.draw(self.screen)
-        
+        self.objective_strategy.draw(self)
         self.player.draw(self.screen)
-        
-        # Draw goal if objective is "reach_goal"
-        if self.objective == GameObjective.REACH_GOAL and self.goal:
-            self.goal.draw(self.screen)
-        
         
         pygame.display.flip()
     
@@ -200,11 +191,11 @@ class Game:
             # Game parameters
             'num_edibles': self.num_edibles,
             'num_obstacles': self.num_obstacles,
-            'num_goals': self.num_goals,
             'screen_width': self.screen_width,
             'screen_height': self.screen_height,
             'objective': self.objective.value if self.objective else None,
-            'player_start_pos': self.player_start_pos,
+            'objective_cfg' : self.objective_cfg,
+            # 'player_start_pos': self.player_start_pos,
             
             # Game objects positions and properties
             'edibles': [
@@ -269,18 +260,20 @@ class Game:
             # Load game parameters
             self.num_edibles = config.get('num_edibles', NUM_OF_EDIBLE_OBJECT)
             self.num_obstacles = config.get('num_obstacles', NUM_OF_OBSTACLES)
-            self.num_goals = config.get('num_goals', NUM_OF_GOALS)
             self.screen_width = config.get('screen_width', SCREEN_WIDTH)
             self.screen_height = config.get('screen_height', SCREEN_HEIGHT)
-            self.player_start_pos = tuple(config.get('player_start_pos', (PLAYER_START_X, PLAYER_START_Y)))
-            
+            # self.player_start_pos = tuple(config.get('player_start_pos', (PLAYER_START_X, PLAYER_START_Y)))
+            player_starting_pos_x =  np.random.randint(0 + Player.width ,self.screen_width - Player.width) 
+            player_starting_pos_y =  np.random.randint(0 + Player.height,self.screen_height - Player.height) 
+            self.player_start_pos = (player_starting_pos_x, player_starting_pos_y)
             # Load objective
             objective_value = config.get('objective')
             if objective_value:
                 self.objective = GameObjective(objective_value)
             else:
                 self.objective = None
-            
+            self.objective_cfg = config.get('objective_cfg')
+
             # Reinitialize pygame screen if dimensions changed
             current_screen_size = self.screen.get_size()
             if current_screen_size != (self.screen_width, self.screen_height):

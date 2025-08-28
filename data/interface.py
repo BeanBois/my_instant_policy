@@ -44,14 +44,20 @@ class GameInterface:
         raw_dense_point_clouds = self.game.get_screen_pixels()
         raw_coords = np.array([[(x,y) for y in range(self.game.screen_height) ]  for x in range(self.game.screen_width)])
         # To ensure that only objects point clouds are picked up, we remove all white pixels and agent pixels
-        mask = ~np.all((raw_dense_point_clouds == [255, 255, 255]) | 
-                    (raw_dense_point_clouds == [128, 0, 128]) |
-                    (raw_dense_point_clouds == [0, 0, 255]) |
-                    (raw_dense_point_clouds != [128, 0 ,128]) | # ignore agent pc
-                    (raw_dense_point_clouds != [0, 0 ,255])  # ignore agent pc
-                    , axis=2)
         
+        
+        
+        WHITE  = np.array([255,255,255])
+        PURPLE = np.array([128,  0,128])  # player eating
+        BLUE   = np.array([  0,  0,255])  # player not eating
+
+        is_white  = np.all(raw_dense_point_clouds == WHITE,  axis=2)
+        is_purple = np.all(raw_dense_point_clouds == PURPLE, axis=2)
+        is_blue   = np.all(raw_dense_point_clouds == BLUE,   axis=2)
+
+        mask = ~(is_white | is_purple | is_blue)
         valid_points = np.where(mask)
+        
         coords = raw_coords[valid_points]
         obs =  {
             #segmented point clouds 
