@@ -9,21 +9,26 @@ class Phi(nn.Module):
     Rels: ('demo','temporal','demo'), ('demo','to','curr'), ('curr','to','demo')
     Output: updated 'curr' features [B, A, D]
     """
-    def __init__(self, dim: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
+    def __init__(self, dim: int, num_freq: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
         super().__init__()
         hid = dim
+        self.num_freq = num_freq
+        e_dim = 4 * self.num_freq
         self.in_proj = nn.ModuleDict({
             'demo': nn.Linear(dim, hid),
             'curr': nn.Linear(dim, hid),
         })
         self.layers = nn.ModuleList()
+
         for _ in range(num_layers):
             convs = {
-                ('demo','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=0, dropout=dropout),
-                ('curr','to','demo'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=0, dropout=dropout),
+                # ('demo','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
+                ('demo','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, dropout=dropout), # shouldnt have edges emb
+                # ('curr','to','demo'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
+                ('curr','to','demo'): TransformerConv((hid, hid), hid // heads, heads=heads, dropout=dropout), # shouldnt have edge emb
             }
             # temporal demo edges (optional if L>1)
-            convs[('demo','temporal','demo')] = TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=0, dropout=dropout)
+            convs[('demo','temporal','demo')] = TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout)
             self.layers.append(HeteroConv(convs, aggr='sum'))
 
         self.norm = nn.ModuleDict({'demo': nn.LayerNorm(hid), 'curr': nn.LayerNorm(hid)})
@@ -36,7 +41,11 @@ class Phi(nn.Module):
             'curr': self.act(self.in_proj['curr'](data['curr'].x)),
         }
         for layer in self.layers:
-            x = layer(x, data.edge_index_dict)
+            # edge_attr_dict = {rel: data[rel].edge_attr for rel in data.edge_types if 'edge_attr' in data[rel]} done need edge emb for all types of edges
+            edge_attr_dict = {
+                ('demo','temporal','demo'): data[('demo','temporal','demo')].edge_attr
+            }
+            x = layer(x, data.edge_index_dict, edge_attr_dict)
             for t in x:
                 x[t] = self.act(self.norm[t](x[t]))
         # project out

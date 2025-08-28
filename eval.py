@@ -298,8 +298,6 @@ if __name__ == "__main__":
         euc_head_dim=cfg.euc_head_dim,
         pred_horizon=cfg.pred_horizon,
         in_dim_agent=cfg.in_dim_agent,
-        curvature=cfg.hyp_curvature,
-        tau=cfg.tau
 
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
     agent_state_dict = torch.load('/checkpoints/...', map_location="cpu")

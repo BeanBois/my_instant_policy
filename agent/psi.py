@@ -9,9 +9,12 @@ class Psi(nn.Module):
     Rels: ('act','temporal','act'), ('curr','to','act'), ('act','to','curr')
     Output: updated 'act' features [B, T*A, D] (you'll reshape to [B,T,A,D])
     """
-    def __init__(self, dim: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
+    def __init__(self, dim: int, num_freq: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
         super().__init__()
         hid = dim
+        self.num_freq = num_freq
+        e_dim = 4 * self.num_freq
+
         self.in_proj = nn.ModuleDict({
             'curr': nn.Linear(dim, hid),
             'act':  nn.Linear(dim, hid),
@@ -19,9 +22,9 @@ class Psi(nn.Module):
         self.layers = nn.ModuleList()
         for _ in range(num_layers):
             convs = {
-                ('curr','to','act'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=0, dropout=dropout),
-                ('act','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=0, dropout=dropout),
-                ('act','temporal','act'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=0, dropout=dropout),
+                ('curr','to','act'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
+                ('act','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
+                ('act','temporal','act'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
             }
             self.layers.append(HeteroConv(convs, aggr='sum'))
 
@@ -35,7 +38,8 @@ class Psi(nn.Module):
             'act':  self.act(self.in_proj['act'](data['act'].x)),
         }
         for layer in self.layers:
-            x = layer(x, data.edge_index_dict)
+            edge_attr_dict = {rel: data[rel].edge_attr for rel in data.edge_types if 'edge_attr' in data[rel]}
+            x = layer(x, data.edge_index_dict, edge_attr_dict)
             for t in x:
                 x[t] = self.act(self.norm[t](x[t]))
         x['act'] = self.out_proj['act'](x['act'])

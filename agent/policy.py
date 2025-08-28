@@ -127,7 +127,10 @@ class Policy(nn.Module):
         ############################ Then align context ###################################
         context_graph = build_context_graph_batch(
             curr_agent_emb = curr_rho_batch,
-            demo_agent_emb = demo_rho_batch
+            curr_agent_info=curr_agent_info,
+            demo_agent_emb = demo_rho_batch,
+            demo_agent_info=demo_agent_info,
+            num_freqs=self.euc_dim//4,
         ) # like in instant policy
         curr_agent_emb_context_aligned_batch = self.phi(context_graph)  # [B,A,de]
         curr_agent_emb_context_aligned_batch = curr_agent_emb_context_aligned_batch.view(-1, num_agent_nodes, self.euc_dim)       # because each graph has exactly A 'curr' nodes
@@ -164,8 +167,11 @@ class Policy(nn.Module):
         pred_rho_batch = flat_pred_rho_batch.view(B,T, num_agent_nodes,-1) # [B, T, A, de]
 
         action_graph = build_action_graph_batch(
-            curr_agent_emb = curr_agent_emb_context_aligned_batch, # [B, A, de]
-            pred_agent_emb = pred_rho_batch # [B, T, A, de]
+            curr_agent_ctx = curr_agent_emb_context_aligned_batch, # [B, A, de]
+            curr_agent_info = curr_agent_info,
+            pred_agent_emb = pred_rho_batch, # [B, T, A, de]
+            pred_agent_info=pred_agent_info,
+            num_freqs=self.euc_dim//4
         )
         final_embd = self.psi(action_graph)  # [B, T, A, de]
         final_embd = final_embd.view(B, self.pred_horizon, num_agent_nodes, self.euc_dim)  
