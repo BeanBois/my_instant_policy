@@ -40,11 +40,14 @@ class Policy(nn.Module):
         )
 
         self.phi = Phi(
-            dim=self.euc_dim
+            dim=self.euc_dim,
+            num_freq=self.euc_dim//4
+
         )
 
         self.psi = Psi(
-            dim=self.euc_dim
+            dim=self.euc_dim,
+            num_freq=self.euc_dim//4
         )
 
         self.action_head = SimpleActionHead(
