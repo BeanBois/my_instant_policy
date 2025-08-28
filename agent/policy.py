@@ -39,7 +39,7 @@ class Policy(nn.Module):
             use_agent_agent = False
         )
 
-        self.psi = Phi(
+        self.phi = Phi(
             dim=self.euc_dim
         )
 

@@ -471,9 +471,7 @@ class TrainConfig:
     num_sampled_pc = 8
     num_att_heads = 4
     euc_head_dim = 16
-    hyp_dim = 2
     in_dim_agent = 9
-    tau=0.5
     pred_horizon = 5
     demo_length = 20
     max_translation = 1000
@@ -518,9 +516,6 @@ if __name__ == "__main__":
         euc_head_dim=cfg.euc_head_dim,
         pred_horizon=cfg.pred_horizon,
         in_dim_agent=cfg.in_dim_agent,
-        curvature=cfg.hyp_curvature,
-        tau=cfg.tau
-
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
 
     # --- Losses
