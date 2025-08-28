@@ -131,8 +131,8 @@ class Policy(nn.Module):
             curr_agent_emb = curr_rho_batch,
             demo_agent_emb = demo_rho_batch
         ) # like in instant policy
-
         curr_agent_emb_context_aligned_batch = self.phi(context_graph)  # [B,A,de]
+        curr_agent_emb_context_aligned_batch = curr_agent_emb_context_aligned_batch.view(-1, num_agent_nodes, self.euc_dim)       # because each graph has exactly A 'curr' nodes
        
         ############################ Then Actions ############################ 
         pred_obj_info, pred_agent_info = self._perform_reverse_action(actions, curr_object_pos, curr_agent_info)
@@ -170,7 +170,7 @@ class Policy(nn.Module):
             pred_agent_emb = pred_rho_batch # [B, T, A, de]
         )
         final_embd = self.psi(action_graph)  # [B, T, A, de]
-
+        final_embd = final_embd.view(B, self.pred_horizon, num_agent_nodes, self.euc_dim)  
         denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
 
         return denoising_direction
