@@ -157,7 +157,7 @@ def build_context_heterodata_single(
         data[('demo', 'temporal', 'demo')].edge_index = ei_demo_temporal
         dp = data['demo'].pos
         rel = dp[ei_demo_temporal[1] - ei_demo_temporal[0]]
-        data[('demo', 'temporal', 'demo')].edge_atrr = fourier_embed_2d(rel, num_freqs=num_freqs)
+        data[('demo', 'temporal', 'demo')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
 
     # demo <-> curr: full bipartite
     Nd = N * L * A
