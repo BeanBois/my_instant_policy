@@ -9,11 +9,11 @@ class Psi(nn.Module):
     Rels: ('act','temporal','act'), ('curr','to','act'), ('act','to','curr')
     Output: updated 'act' features [B, T*A, D] (you'll reshape to [B,T,A,D])
     """
-    def __init__(self, dim: int, num_freq: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
+    def __init__(self, dim: int, e_dim: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
         super().__init__()
         hid = dim
-        self.num_freq = num_freq
-        e_dim = 4 * self.num_freq
+
+        self.e_dim = e_dim
 
         self.in_proj = nn.ModuleDict({
             'curr': nn.Linear(dim, hid),

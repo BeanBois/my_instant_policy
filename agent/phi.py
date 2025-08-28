@@ -9,11 +9,10 @@ class Phi(nn.Module):
     Rels: ('demo','temporal','demo'), ('demo','to','curr'), ('curr','to','demo')
     Output: updated 'curr' features [B, A, D]
     """
-    def __init__(self, dim: int, num_freq: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
+    def __init__(self, dim: int, e_dim: int, num_layers: int = 2, heads: int = 4, dropout: float = 0.1):
         super().__init__()
         hid = dim
-        self.num_freq = num_freq
-        e_dim = 4 * self.num_freq
+        self.e_dim = e_dim
         self.in_proj = nn.ModuleDict({
             'demo': nn.Linear(dim, hid),
             'curr': nn.Linear(dim, hid),

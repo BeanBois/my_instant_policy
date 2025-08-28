@@ -137,7 +137,7 @@ def build_context_heterodata_single(
     data['curr'].pos = curr_agent_pos.float()          # [A, 2]
     demo_flat = demo_agent_emb.reshape(N * L * A, D)
     data['demo'].x = demo_flat               # [N*L*A, D]
-    demo_pos_flat = demo_agent_pos.view(N*L*A,3)
+    demo_pos_flat = demo_agent_pos.view(N*L*A,2)
     data['demo'].pos = demo_pos_flat.float()               # [N*L*A, 2]
     
 
