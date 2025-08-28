@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-from configs import ANGULAR_GRANULITIES
 from utilities import * 
 
 # aux
