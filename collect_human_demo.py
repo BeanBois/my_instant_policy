@@ -162,7 +162,6 @@ def save_demo_metadata(demo, filepath):
     except Exception as e:
         print(f"Warning: Could not save metadata: {e}")
 
-# Enhanced save_demo function with metadata
 def save_demo_with_metadata(demo, filepath):
     """
     Save demo and its metadata.
@@ -173,8 +172,6 @@ def save_demo_with_metadata(demo, filepath):
     """
     save_demo(demo, filepath)
     save_demo_metadata(demo, filepath)
-# Include the save_demo functions here (from the artifact above)
-# ... [save_demo, load_demo, save_demo_metadata functions] ...
 
 def collect_human_demos(num_types_demo = NUM_KIND_OF_DEMO, demoset_size = DEMOSET_SIZE):
     """Collect human demonstrations across different configurations."""
@@ -189,11 +186,8 @@ def collect_human_demos(num_types_demo = NUM_KIND_OF_DEMO, demoset_size = DEMOSE
         # Create directory structure
         filepath = f'human_demo/demoset{i}/'
         os.makedirs(filepath, exist_ok=True)
-        
         # Save demo set configuration
         config_path = filepath + 'demo_config'
-        game_interface.save_config(config_path + '.json')
-        print(f"Saved configuration: {config_path}.json")
         
         # Collect demos for this configuration
         for j in range(demoset_size):
@@ -224,7 +218,8 @@ def collect_human_demos(num_types_demo = NUM_KIND_OF_DEMO, demoset_size = DEMOSE
             
             # Save demo with metadata
             demo_path = filepath + f'demo{j}'
-            save_demo_with_metadata(demo, demo_path)
+            # save_demo_with_metadata(demo, demo_path)
+            save_demo(demo, demo_path)
             
             print(f"Demo {j} completed: {len(demo)} observations saved")
         
@@ -314,7 +309,7 @@ if __name__ == "__main__":
     # Inspect a specific demo
     # demo = load_and_inspect_demo(demoset_id=0, demo_id=0)
 
-    collect_human_demos(num_types_demo=5,demoset_size=20)
+    collect_human_demos(num_types_demo=4,demoset_size=1)
     
     # Replay a demo with its configuration (for sanity check)
     # replay_demo_with_config(demoset_id=0, demo_id=0)

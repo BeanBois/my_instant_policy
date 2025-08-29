@@ -19,8 +19,7 @@ class Game:
         player_start_pos = None
         ):
 
-        self.num_edibles = num_edibles
-        self.num_obstacles = num_obstacles
+
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
@@ -50,8 +49,6 @@ class Game:
 
             self.objective_cfg = {
                 'difficulty' : difficulty,
-                'num_edibles' : self.num_edibles,
-                'num_obstacles' : self.num_obstacles,
                 'target' : (random_target_x, random_target_y)
             }  
 
@@ -66,10 +63,9 @@ class Game:
         if self.objective is None:
             self.objective = random.choice([objective for objective in GameObjective])
 
-
-
         self.objective_strategy = make_objective_strategy(self, cfg=getattr(self, 'objective_cfg', None))
-
+        self.objective_strategy.setup(self)
+        
         # Command line print to inform player
         print("-" * 25)
         objective_str = None
@@ -189,8 +185,6 @@ class Game:
         """
         config = {
             # Game parameters
-            'num_edibles': self.num_edibles,
-            'num_obstacles': self.num_obstacles,
             'screen_width': self.screen_width,
             'screen_height': self.screen_height,
             'objective': self.objective.value if self.objective else None,
@@ -258,8 +252,6 @@ class Game:
                 config = json.load(f)
             
             # Load game parameters
-            self.num_edibles = config.get('num_edibles', NUM_OF_EDIBLE_OBJECT)
-            self.num_obstacles = config.get('num_obstacles', NUM_OF_OBSTACLES)
             self.screen_width = config.get('screen_width', SCREEN_WIDTH)
             self.screen_height = config.get('screen_height', SCREEN_HEIGHT)
             # self.player_start_pos = tuple(config.get('player_start_pos', (PLAYER_START_X, PLAYER_START_Y)))
@@ -273,7 +265,7 @@ class Game:
             else:
                 self.objective = None
             self.objective_cfg = config.get('objective_cfg')
-
+            self.objective_strategy = make_objective_strategy(self, self.objective_cfg)
             # Reinitialize pygame screen if dimensions changed
             current_screen_size = self.screen.get_size()
             if current_screen_size != (self.screen_width, self.screen_height):
@@ -314,8 +306,8 @@ class Game:
                 self.goal = Goal(goal_data['x'], goal_data['y'])
             
             # Load game state
-            self.game_over = config.get('game_over', False)
-            self.game_won = config.get('game_won', False)
+            self.game_over = False
+            self.game_won = False
             
             print(f"Game configuration loaded from {filename}")
             print("-" * 25)
@@ -324,6 +316,11 @@ class Game:
                 objective_str = "eat all food"
             elif self.objective is GameObjective.REACH_GOAL:
                 objective_str = "reach goal"
+            elif self.objective is GameObjective.PUSH_AND_PLACE:
+                objective_str = 'push and place'
+            elif self.objective is GameObjective.PARKING:
+                objective_str = 'parking'
+                self.objective_strategy.setup(self)
             else:
                 objective_str = "unknown"
             print(f"Loaded game objective: {objective_str}")

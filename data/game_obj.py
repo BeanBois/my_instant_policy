@@ -23,11 +23,12 @@ class ObjectiveStrategy:
 
 
 class EatAllStrategy(ObjectiveStrategy):
+    NUM_EDIBLES = 2
     def __init__(self):
         pass 
 
     def setup(self, game): 
-        for _ in range(game.num_edibles):
+        for _ in range(EatAllStrategy.NUM_EDIBLES):
             x = random.randint(50, game.screen_width - 50)
             y = random.randint(50, game.screen_height - 50)
             # Make sure edibles don't spawn too close to player
@@ -59,11 +60,12 @@ class EatAllStrategy(ObjectiveStrategy):
         return all(e.eaten for e in game.edibles)
 
 class ReachGoalStrategy(ObjectiveStrategy):
+    NUM_OBSTACLES = 1
     def __init__(self):
         pass 
 
     def setup(self, game): 
-        for _ in range(game.num_obstacles):
+        for _ in range(ReachGoalStrategy.NUM_OBSTACLES):
             x = random.randint(50, game.screen_width - 50)
             y = random.randint(50, game.screen_height - 50)
             # Make sure obstacles don't spawn too close to player
@@ -74,8 +76,8 @@ class ReachGoalStrategy(ObjectiveStrategy):
             width = random.randint(30, 50)
             height = random.randint(30, 50)
             game.obstacles.append(Obstacle(x, y, width, height))
-            goal_position = (game.screen_width - 100 + np.random.randint(-25,25), game.screen_height - 100 + np.random.randint(-25,25))
-            game.goal = Goal(goal_position[0], goal_position[1])
+        goal_position = (game.screen_width - 100 + np.random.randint(-25,25), game.screen_height - 100 + np.random.randint(-25,25))
+        game.goal = Goal(goal_position[0], goal_position[1])
 
     def update(self, game):
 
@@ -102,13 +104,14 @@ class ReachGoalStrategy(ObjectiveStrategy):
 @dataclass
 class ParkingTarget:
     x: float; y: float; theta_deg: float
-    pos_threshold: float = 2.0
-    ang_threshold_deg: float = 5.0
+    pos_threshold: float = 5.0
+    ang_threshold_deg: float = 10.0
 
 class ParkAtPoseStrategy(ObjectiveStrategy):
     def __init__(self, target: ParkingTarget, difficulty = GameDifficulty.EASY):
         self.target = target
         self.difficulty = difficulty
+
     def setup(self, game):
         # optional: show a visual marker using your Goal rect for now
         game.goal = Goal(int(self.target.x), int(self.target.y))
@@ -222,11 +225,11 @@ def make_objective_strategy(game, cfg=None):
     if game.objective == GameObjective.REACH_GOAL:
         return ReachGoalStrategy()
     if getattr(game, 'objective', None) == GameObjective(3):  # or add enum PARK_AT_POSE
-        x,y = cfg='target'
-        parking_target = ParkingTarget(x,y)
+        x,y = cfg['target']
+        parking_target = ParkingTarget(x,y,0)
         return ParkAtPoseStrategy(parking_target, cfg['difficulty'])
     if getattr(game, 'objective', None) == GameObjective(4):  # or add enum PUSH_OBJECT_TO_GOAL
-        x,y = cfg='target'
+        x,y = cfg['target']
         push_spec = PushSpec(x,y)
         return PushObjectToGoalStrategy(push_spec, cfg['difficulty'])
     raise ValueError("Unknown objective")
