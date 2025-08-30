@@ -86,7 +86,10 @@ class Agent(nn.Module):
         actions = torch.cat([dxdy, theta, state], dim=-1)  # [B,T,4]
 
         if keypoints is None:
-            kp = torch.tensor([]
+            kp = torch.tensor([(20, 0), 
+                 (-14.747874310824908, 13.509263611023021), 
+                 (-14.747874310824908, -13.509263611023021), 
+                 (0, 0)]
                 , device=device, dtype=actions.dtype
             )  # [A,2]
         else:
@@ -286,3 +289,5 @@ class Agent(nn.Module):
             R = torch.einsum("btik,btkj->btij", Vh_fix, U.transpose(-2,-1))
         t = (muQ - torch.einsum("btij,btaj->btai", R, muP)).squeeze(-2)  # [B,T,2]
         return R, t  # aligns P -> Q
+
+

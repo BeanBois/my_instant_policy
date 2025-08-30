@@ -21,8 +21,8 @@ import numpy as np
 from enum import Enum 
 
 
-DEMOSET_SIZE = 1
-NUM_KIND_OF_DEMO = 1
+DEMOSET_SIZE = 10
+NUM_KIND_OF_DEMO = 4
 
 
 def save_demo(demo, filepath):
@@ -236,14 +236,13 @@ def load_and_inspect_demo(demoset_id, demo_id):
     filepath = f'human_demo/demoset{demoset_id}/demo{demo_id}'
     
     try:
-        breakpoint()
 
         demo = load_demo(filepath)
         print(f"Loaded demo: {len(demo)} observations")
         
-        if demo:
-            print("Sample observation keys:", list(demo[0].keys()))
-            print("First observation:", demo[0])
+        # if demo:
+        #     print("Sample observation keys:", list(demo[0].keys()))
+        #     print("First observation:", demo[0])
         
         return demo
         
@@ -302,14 +301,70 @@ def replay_demo_with_config(demoset_id, demo_id):
     else:
         print(f"Failed to load config for demoset {demoset_id}")
 
+
+
+def collect_human_demos_for(objective, demo_num):
+    """Collect human demonstrations across different configurations."""
+    
+    print(f"\n{'='*50}")
+    print(f"Collecting for DEMOSET {objective.value - 1}")
+    print(f"{'='*50}")
+    
+    game_interface = GameInterface()
+    
+    # Create directory structure
+    filepath = f'human_demo/demoset{objective.value - 1}/'
+    os.makedirs(filepath, exist_ok=True)
+    # Save demo set configuration
+    config_path = filepath + 'demo_config'
+    
+    
+    # Reset game for new demo
+    game_interface.reset()
+    game_interface.set_initial_config(config_path + '.json')
+    game_interface.start_game()
+
+    # Clear previous observations
+    game_interface.observations = []
+
+    # Run demo collection
+    step_count = 0
+    while game_interface.running:
+        game_interface.step()
+
+        step_count += 1
+            
+            # Optional: Add timeout to prevent infinite loops
+        if step_count > 10000:  # Adjust as needed
+            print("Demo timeout reached, ending collection")
+            break
+
+    # Get collected observations
+    demo = game_interface.observations
+        
+    # Save demo with metadata
+    demo_path = filepath + f'demo{demo_num}'
+    # save_demo_with_metadata(demo, demo_path)
+    save_demo(demo, demo_path)
+        
+    
+    print(f"Completed demos collection")
+
+
 # Usage examples:
 if __name__ == "__main__":
     # Collect all demos
     # collect_human_demos()
     # Inspect a specific demo
-    # demo = load_and_inspect_demo(demoset_id=0, demo_id=0)
+    demo = load_and_inspect_demo(demoset_id=0, demo_id=0)
+    print(len(demo))
 
-    collect_human_demos(num_types_demo=4,demoset_size=1)
+    # collect_human_demos(num_types_demo=4,demoset_size=10)
+
+
+    # from data import GameObjective
+    # collect_human_demos_for(GameObjective.REACH_GOAL, 7)
     
     # Replay a demo with its configuration (for sanity check)
     # replay_demo_with_config(demoset_id=0, demo_id=0)
+    pass 

@@ -9,12 +9,12 @@ class GameInterface:
     agent_keypoints = Player(100,100).get_keypoints(frame='self')
 
 
-    def __init__(self,num_edibles = NUM_OF_EDIBLE_OBJECT, num_obstacles = NUM_OF_OBSTACLES, mode = GameMode.DEMO_MODE):
+    def __init__(self,num_edibles = NUM_OF_EDIBLE_OBJECT, num_obstacles = NUM_OF_OBSTACLES, mode = GameMode.DEMO_MODE, objective = None):
         # dont run headless
         if 'SDL_VIDEODRIVER' in os.environ:
             del os.environ['SDL_VIDEODRIVER']
 
-        self.game = Game(num_edibles=num_edibles, num_obstacles=num_obstacles)
+        self.game = Game(num_edibles=num_edibles, num_obstacles=num_obstacles, objective=objective)
         self.running = True
         self.t = 0
         self.mode = mode

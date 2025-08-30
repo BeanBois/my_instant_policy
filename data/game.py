@@ -52,7 +52,7 @@ class Game:
                 'target' : (random_target_x, random_target_y)
             }  
 
-        self.objective = None 
+        self.objective = objective 
         self.game_over = False
         self.game_won = False
 
@@ -71,6 +71,10 @@ class Game:
         objective_str = None
         if self.objective is GameObjective.EAT_ALL:
             objective_str = "eat all food"
+        elif self.objective is GameObjective.PARKING:
+            objective_str = "parking"
+        elif self.objective is GameObjective.PUSH_AND_PLACE:
+            objective_str = 'push and place'
         else:
             objective_str = "reach goal"
         print(f"Welcome to the game, your objective is to {objective_str}")
@@ -88,32 +92,33 @@ class Game:
         if not self.game_over and not self.game_won:
             if keys[pygame.K_UP] or keys[pygame.K_w]:
                 self.player.move_forward()
-                if self.objective == GameObjective.PUSH_AND_PLACE:
-                    obj = self.edibles[0]
-                    in_contact = obj.eaten 
-                    if in_contact:
-                        obj.move_forward(self.player.angle)
+                # if self.objective == GameObjective.PUSH_AND_PLACE:
+                #     obj = self.edibles[0]
+                #     in_contact = obj.eaten 
+                #     if in_contact:
+                #         obj.move_forward(self.player.angle)
             if keys[pygame.K_DOWN] or keys[pygame.K_s]:
                 self.player.move_backward()
-                if self.objective == GameObjective.PUSH_AND_PLACE:
-                    obj = self.edibles[0]
-                    in_contact = obj.eaten 
-                    if in_contact:
-                        obj.move_backward(self.player.angle)
+                # if self.objective == GameObjective.PUSH_AND_PLACE:
+                #     obj = self.edibles[0]
+                #     in_contact = obj.eaten 
+                #     if in_contact:
+                #         obj.move_backward(self.player.angle)
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 self.player.rotate_left()
-                if self.objective == GameObjective.PUSH_AND_PLACE:
-                    obj = self.edibles[0]
-                    in_contact = obj.eaten 
-                    if in_contact:
-                        obj.rotate_left(self.player.size)
+                # if self.objective == GameObjective.PUSH_AND_PLACE:
+                #     obj = self.edibles[0]
+                #     in_contact = obj.eaten 
+                #     if in_contact:
+                #         obj.rotate_left(self.player.size)
             if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
                 self.player.rotate_right()
-                if self.objective == GameObjective.PUSH_AND_PLACE:
-                    obj = self.edibles[0]
-                    in_contact = obj.eaten 
-                    if in_contact:
-                        obj.rotate_right(self.player.sizes)
+                # if self.objective == GameObjective.PUSH_AND_PLACE:
+                #     obj = self.edibles[0]
+                #     in_contact = obj.eaten 
+                #     if in_contact:
+                #         obj.rotate_right(self.player.size)
+                
 
         return True
 
