@@ -69,11 +69,11 @@ def build_local_heterodata_single(
     data[('agent', 'to', 'scene')].edge_attr  = eattr_as
 
     # edges: scene -> agent
-    # ei_sa = _fully_connected_edges(n_s, n_a)
-    # delta_sa = pos_a[ei_sa[1]] - scene_pos[ei_sa[0]]
-    # eattr_sa = fourier_embed_2d(delta_sa, num_freqs=num_freqs)
-    # data[('scene', 'to', 'agent')].edge_index = ei_sa
-    # data[('scene', 'to', 'agent')].edge_attr  = eattr_sa
+    ei_sa = _fully_connected_edges(n_s, n_a)
+    delta_sa = pos_a[ei_sa[1]] - scene_pos[ei_sa[0]]
+    eattr_sa = fourier_embed_2d(delta_sa, num_freqs=num_freqs)
+    data[('scene', 'to', 'agent')].edge_index = ei_sa
+    data[('scene', 'to', 'agent')].edge_attr  = eattr_sa
 
     # optional agent -> agent (no self loops)
     if include_agent_agent and n_a > 1:
