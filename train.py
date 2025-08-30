@@ -480,7 +480,7 @@ class TrainConfig:
     beta_end = 0.02
 
     # flags
-    train_geo_encoder = False
+    train_geo_encoder = True
 
 
 
