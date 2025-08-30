@@ -456,7 +456,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-4
     weight_decay: float = 1e-4
-    max_steps: int = 50000
+    max_steps: int = 5000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -480,7 +480,7 @@ class TrainConfig:
     beta_end = 0.02
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
 
 
 
@@ -573,7 +573,7 @@ if __name__ == "__main__":
                 torch.nn.utils.clip_grad_norm_(agent.parameters(), cfg.grad_clip)
             scaler.step(optim)
             scaler.update()
-
+            avg_loss += loss.item()
             if step % cfg.log_every == 0:
                 avg_losses.append((step, avg_loss/cfg.log_every))
                 print(f"[step {step:6d}] loss={avg_loss/cfg.log_every:.4f}")
@@ -589,6 +589,6 @@ if __name__ == "__main__":
                 path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pth")
                 torch.save(ckpt, path)
                 print(f"Saved checkpoint to {path}")
-
+    np.save('model_losses',avg_losses)
 
 
