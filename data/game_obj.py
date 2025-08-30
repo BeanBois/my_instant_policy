@@ -104,7 +104,7 @@ class ReachGoalStrategy(ObjectiveStrategy):
 @dataclass
 class ParkingTarget:
     x: float; y: float; theta_deg: float
-    pos_threshold: float = 5.0
+    pos_threshold: float = 10.0
     ang_threshold_deg: float = 10.0
 
 class ParkAtPoseStrategy(ObjectiveStrategy):
@@ -118,7 +118,7 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
 
         # create 3 obstacles walls around parking space of PLAYER_SIZE * 2.5 
         # walls (short side) are of width 10  
-        space = PLAYER_SIZE * 2.5 
+        space = PLAYER_SIZE * 3
         wall_thickness = 10
         wall1 = Obstacle(self.target.x + space//2, self.target.y, width=wall_thickness, height=space)
         wall2 = Obstacle(self.target.x - space//2, self.target.y,width=wall_thickness, height=space)
@@ -142,9 +142,9 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
     def draw(self, game):
         # could draw a small orientation arrow at target.theta_deg if you like
         game.goal.draw(game.screen)
-        if self.difficulty == GameDifficulty.HARD:
-            for obstacle in game.obstacles:
-                obstacle.draw(game.screen)
+        # if self.difficulty == GameDifficulty.HARD:
+        for obstacle in game.obstacles:
+            obstacle.draw(game.screen)
 
     def is_success(self, game):
         if game.game_over:
@@ -154,12 +154,12 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
         # position
         dx = px - self.target.x; dy = py - self.target.y
         pos_ok = math.hypot(dx, dy) <= self.target.pos_threshold
-
         if self.difficulty == GameDifficulty.EASY:
             return pos_ok
         # angle (wrap)
         d = (ang - self.target.theta_deg + 180.0) % 360.0 - 180.0
-        ang_ok = abs(d) <= self.target.ang_threshold_deg
+        ang_ok =(abs(d) <= self.target.ang_threshold_deg 
+    or abs(abs(d) - 180) <= self.target.ang_threshold_deg)
 
         # if self.difficulty == GameDifficulty.MEDIUM:
             # return pos_ok and ang_ok
@@ -177,15 +177,15 @@ class PushSpec:
     goal_x: float; goal_y: float; goal_radius: float = 12.0
 
 class PushObjectToGoalStrategy(ObjectiveStrategy):
-    def __init__(self, spec: PushSpec = None, difficulty = GameDifficulty.EASY):
+    def __init__(self, spec: PushSpec = None, difficulty = GameDifficulty.EASY, obj_pos = None):
         self.spec = spec
-        self.object_pos = None 
+        self.object_pos = (200, 400) 
         self.difficulty = difficulty
 
 
     def setup(self, game):
         game.goal = Goal(int(self.spec.goal_x), int(self.spec.goal_y))
-        game.edibles = [EdibleObject(int(self.object_pos[0]), int(self.object_pos[1]))]
+        game.edibles.append(EdibleObject(int(self.object_pos[0]), int(self.object_pos[1])))
 
     def draw(self, game):
         for edible in game.edibles:
@@ -199,14 +199,19 @@ class PushObjectToGoalStrategy(ObjectiveStrategy):
         px, py = game.player.get_pos()
         obj = game.edibles[0]
         obj_x, obj_y = obj.get_pos()
-        push_radius = min([game.player.size, obj.width, obj.height])
+        push_radius = min([game.player.size, obj.width, obj.height]) + 5
         if math.hypot(px - obj_x, py - obj_y) <= push_radius:
             if self.difficulty != GameDifficulty.EASY and game.player.state == PlayerState.EATING:
-                obj.eaten = True
+                # obj.eaten = True
+                obj.x = px 
+                obj.y = py 
             elif self.difficulty == GameDifficulty.EASY:
-                obj.eaten = True 
+                obj.x = px 
+                obj.y = py 
+                # obj.eaten = True 
         else:
-            obj.eateN = False
+            # obj.eaten = False
+            pass 
 
     
     def is_success(self, game):
@@ -224,11 +229,11 @@ def make_objective_strategy(game, cfg=None):
         return EatAllStrategy()
     if game.objective == GameObjective.REACH_GOAL:
         return ReachGoalStrategy()
-    if getattr(game, 'objective', None) == GameObjective(3):  # or add enum PARK_AT_POSE
+    if getattr(game, 'objective', None) == GameObjective.PARKING:  # or add enum PARK_AT_POSE
         x,y = cfg['target']
         parking_target = ParkingTarget(x,y,0)
         return ParkAtPoseStrategy(parking_target, cfg['difficulty'])
-    if getattr(game, 'objective', None) == GameObjective(4):  # or add enum PUSH_OBJECT_TO_GOAL
+    if getattr(game, 'objective', None) == GameObjective.PUSH_AND_PLACE:  # or add enum PUSH_OBJECT_TO_GOAL
         x,y = cfg['target']
         push_spec = PushSpec(x,y)
         return PushObjectToGoalStrategy(push_spec, cfg['difficulty'])

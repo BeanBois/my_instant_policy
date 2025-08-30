@@ -69,11 +69,11 @@ def build_local_heterodata_single(
     data[('agent', 'to', 'scene')].edge_attr  = eattr_as
 
     # edges: scene -> agent
-    ei_sa = _fully_connected_edges(n_s, n_a)
-    delta_sa = pos_a[ei_sa[1]] - scene_pos[ei_sa[0]]
-    eattr_sa = fourier_embed_2d(delta_sa, num_freqs=num_freqs)
-    data[('scene', 'to', 'agent')].edge_index = ei_sa
-    data[('scene', 'to', 'agent')].edge_attr  = eattr_sa
+    # ei_sa = _fully_connected_edges(n_s, n_a)
+    # delta_sa = pos_a[ei_sa[1]] - scene_pos[ei_sa[0]]
+    # eattr_sa = fourier_embed_2d(delta_sa, num_freqs=num_freqs)
+    # data[('scene', 'to', 'agent')].edge_index = ei_sa
+    # data[('scene', 'to', 'agent')].edge_attr  = eattr_sa
 
     # optional agent -> agent (no self loops)
     if include_agent_agent and n_a > 1:
@@ -145,14 +145,14 @@ def build_context_heterodata_single(
     def demo_idx(n, l, a):  # 0<=n<N, 0<=l<L, 0<=a<A
         return (n * L + l) * A + a
 
-    # temporal edges in demo: (n, l, a) -> (n, l+1, a)
+    # temporal edges in demo: (n, l+1, a) -> (n, l, a)
     if L > 1:
         src_t, dst_t = [], []
         for n in range(N):
             for a in range(A):
                 for l in range(L - 1):
-                    src_t.append(demo_idx(n, l, a))
-                    dst_t.append(demo_idx(n, l + 1, a))
+                    src_t.append(demo_idx(n, l + 1, a))
+                    dst_t.append(demo_idx(n, l, a))
         ei_demo_temporal = torch.tensor([src_t, dst_t], dtype=torch.long)
         data[('demo', 'temporal', 'demo')].edge_index = ei_demo_temporal
         dp = data['demo'].pos

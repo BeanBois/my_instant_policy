@@ -11,6 +11,8 @@ from typing import List,Dict, Tuple
 from data import PseudoDemoGenerator, GameMode, Action 
 from train import PseudoDemoDataset  
 from math import sqrt
+from collect_human_demo import load_and_inspect_demo, DEMOSET_SIZE, load_demo_config
+import random 
 
 AGENT_KEYPOINTS = [PseudoDemoGenerator.agent_keypoints[k] for k in PseudoDemoDataset.kp_order]   
 
@@ -29,11 +31,22 @@ def collect_demos(game_interface, num_demos, manual=True, max_demo_length = 20):
                 observations = downsample_obs(demo, max_demo_length)
                 provided_demos.append(observations)
             
-            game_interface.reset()
-        return provided_demos
-    
+    else:
+        demoset_id = game_interface.game.objective.value - 1
+        chosen_demos = torch.randint(0,DEMOSET_SIZE, (num_demos,))
+        for idx in chosen_demos:
+            demo  = load_and_inspect_demo(demoset_id=demoset_id, demo_id=idx)
+            provided_demos.append(demo)
+        
+        # set config to match demos
+        filepath = f'human_demo/demoset{demoset_id}/'
+        config_path = filepath + 'demo_config.json'
+
+        game_interface.set_initial_config(config_path)
+
     print(f"Collected {len(provided_demos)} demonstrations")
-    pass
+    return provided_demos
+
 
 def downsample_obs(observations, target_length):
         """
@@ -251,23 +264,24 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
     won = False 
     while not done and _t < max_iter:
         curr_agent_info, curr_object_pos = process_obs(curr_obs)
-        for _ in range(horizon):
-            actions = agent.plan_actions(
-                curr_agent_info = curr_agent_info,         # shape as in training
-                curr_object_pos = curr_object_pos,
-                demo_agent_info = demo_agent_info,
-                demo_object_pos = demo_object_pos,
-                T = horizon,
-                K = refine,
-                keypoints = keypoints
-            )  # [B,T,4]
-            a0 = actions[:, 0]  # execute first step
+        actions = agent.plan_actions(
+            curr_agent_info = curr_agent_info,         # shape as in training
+            curr_object_pos = curr_object_pos,
+            demo_agent_info = demo_agent_info,
+            demo_object_pos = demo_object_pos,
+            T = horizon,
+            K = refine,
+            keypoints = keypoints
+        )  # [B,T,4]
+        for a0 in actions:
+            a0 = actions  
             action_obj = action_from_vec(a0)
             curr_obs = game_interface.step(action_obj)
             done = curr_obs['done']
             if done:
                 won = curr_obs['won']
                 break
+            _t +=1 
     return won 
         
 
