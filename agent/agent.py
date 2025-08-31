@@ -99,11 +99,12 @@ class Agent(nn.Module):
         for _ in range(K):
             
             # 1) predict per-node denoising directions ε_pred: [B,T,A,5]
-            eps_pred = self.policy(
+            eps_pred_norm = self.policy(
                 curr_agent_info, curr_object_pos,
                 demo_agent_info, demo_object_pos,
                 actions
             )
+            eps_pred = self._unnormalise_denoising_directions(eps_pred_norm)
 
             # split components
             dt = eps_pred[..., 0:2]                   # [B,T,A,2] (same across A ideally)
