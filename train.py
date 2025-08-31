@@ -474,7 +474,7 @@ class TrainConfig:
     in_dim_agent = 9
     pred_horizon = 5
     demo_length = 20
-    max_translation = 1000
+    max_translation = 100
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
