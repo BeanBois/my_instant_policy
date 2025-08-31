@@ -167,6 +167,7 @@ def fourier_feats_2d(delta: torch.Tensor, L: int) -> torch.Tensor:
     NeRF-like Fourier features over 2D offsets.
     delta: [K,2]; returns [K, 4*L] = [sin(wx),cos(wx), sin(wy),cos(wy)]_l
     """
+    delta = delta.to(torch.float32)
     outs = []
     for l in range(L):
         w = (2.0 ** l) * math.pi
