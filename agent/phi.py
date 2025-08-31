@@ -4,7 +4,7 @@ from torch_geometric.nn import HeteroConv, TransformerConv
 
 class Phi(nn.Module):
     """
-    ϕ: Context aligner.
+    phi : Context aligner.
     Hetero types: 'demo', 'curr'
     Rels: ('demo','temporal','demo'), ('demo','to','curr'), ('curr','to','demo')
     Output: updated 'curr' features [B, A, D]
@@ -21,12 +21,9 @@ class Phi(nn.Module):
 
         for _ in range(num_layers):
             convs = {
-                # ('demo','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
                 ('demo','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, dropout=dropout), # shouldnt have edges emb
-                # ('curr','to','demo'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
                 ('curr','to','demo'): TransformerConv((hid, hid), hid // heads, heads=heads, dropout=dropout), # shouldnt have edge emb
             }
-            # temporal demo edges (optional if L>1)
             convs[('demo','temporal','demo')] = TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout)
             self.layers.append(HeteroConv(convs, aggr='sum'))
 
@@ -40,7 +37,6 @@ class Phi(nn.Module):
             'curr': self.act(self.in_proj['curr'](data['curr'].x)),
         }
         for layer in self.layers:
-            # edge_attr_dict = {rel: data[rel].edge_attr for rel in data.edge_types if 'edge_attr' in data[rel]} done need edge emb for all types of edges
             edge_attr_dict = {
                 ('demo','temporal','demo'): data[('demo','temporal','demo')].edge_attr
             }
