@@ -99,9 +99,10 @@ class PseudoDemoDataset(Dataset):
         demo_agent_action = torch.randn(B, N, L-1, ad)
 
         curr_obs, context, _clean_actions = self.data_gen.get_batch_samples(self.B)
-        curr_agent_info, curr_object_pos = self._process_obs(curr_obs)
+        _offset_index = random.randint(0,len(curr_obs[0]) - 1) if len(curr_obs[0]) > 0 else 0
+        curr_agent_info, curr_object_pos = self._process_obs(curr_obs, _offset_index)
         demo_agent_info, demo_object_pos, demo_agent_action = self._process_context(context)
-        clean_actions = self._process_actions(_clean_actions)
+        clean_actions = self._process_actions(_clean_actions, _offset_index)
 
         # Monotone times for each demo traj
         base = torch.arange(L).float()[None, None, :].expand(B, N, L)
@@ -115,7 +116,7 @@ class PseudoDemoDataset(Dataset):
             demo_time=demo_time, curr_time=curr_time
         )
 
-    def _process_obs(self, curr_obs: List[Dict]):
+    def _process_obs(self, curr_obs: List[Dict], _offset_indx ):
         """
         curr_obs: list length B. Each element is a list of observation dicts
                   (from PDGen._get_ground_truth: 'curr_obs_set').
@@ -136,7 +137,7 @@ class PseudoDemoDataset(Dataset):
 
         for b in range(B):
             # Use the first "current" obs for this sample
-            ob = curr_obs[b][0] if isinstance(curr_obs[b], list) else curr_obs[b]
+            ob = curr_obs[b][_offset_indx] if isinstance(curr_obs[b], list) else curr_obs[b]
 
             # Scalars
             cx, cy = float(ob["agent-pos"][0][0]), float(ob["agent-pos"][0][1])
@@ -180,7 +181,7 @@ class PseudoDemoDataset(Dataset):
         curr_object_pos = torch.stack(obj_coords_all, dim=0)  # [B,M,2]
         return curr_agent_info, curr_object_pos
 
-    def _process_actions(self, _clean_actions: List[List[torch.Tensor]]):
+    def _process_actions(self, _clean_actions: List[List[torch.Tensor]], _offset_indx):
         """
         _clean_actions: list length B; each element is a LIST of length >=1,
                         where each entry is a [T, 10] tensor:
@@ -201,7 +202,7 @@ class PseudoDemoDataset(Dataset):
         out = []
         for b in range(B):
             # take the first pred-horizon sequence for this sample
-            seq = _clean_actions[b][0]  # [T, 10] on same device as generator set
+            seq = _clean_actions[b][_offset_indx]  # [T, 10] on same device as generator set
             # Robustness: pad/truncate to T if needed
             Tb = seq.shape[0]
             if Tb < T:

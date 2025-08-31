@@ -89,8 +89,12 @@ class Agent(nn.Module):
         # T (horizon) from actions or model attr
         if actions is None:
             T = getattr(self, "pred_horizon", None)
-            assert T is not None, "Provide actions or set self.pred_horizon"
+            assert T is not None, "Provide actions or set self.pred_horizon"   
             actions = torch.zeros(B, T, 4, device=device, dtype=dtype)
+            actions[...,:2] = torch.randn(B, T, 2, device=device) * (self.max_translation / 10.0)
+            actions[...,2:3] = (torch.rand(B, T, 1, device=device) - 0.5) * (2*torch.pi/6)  # +/- 30°
+            actions[...,3:4] = torch.full((B,T,1), 0.5, device=device)
+
         else:
             T = actions.shape[1]
 
@@ -268,7 +272,7 @@ class Agent(nn.Module):
                         x[..., 2:4] * self.max_translation *torch.tensor([torch.cos(self.max_rotation_rad), torch.sin(self.max_rotation_rad)]),
                         x[..., 4:5]], dim=-1)
 
-    def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor = None) -> Tensor:
+    def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor) -> Tensor:
         """
         actions: [B,T,4]  (dx,dy,theta,state)
         denoise: [B,T,A,5] (tx,ty, dx_i,dy_i, ds)  -- your head’s layout
@@ -280,18 +284,7 @@ class Agent(nn.Module):
         A = denoise.shape[2]
 
         # keypoints
-        if keypoints is None:
-            if hasattr(self, "keypoints") and self.keypoints is not None:
-                kp0 = self.keypoints.to(device=device, dtype=dtype)[:A]
-            else:
-                s = torch.tensor(1.0, device=device, dtype=dtype)
-                kp0 = torch.stack([
-                    torch.tensor([0., 0.], device=device, dtype=dtype),
-                    torch.tensor([ s, 0.], device=device, dtype=dtype),
-                    torch.tensor([-s, 0.], device=device, dtype=dtype),
-                    torch.tensor([0.,  s], device=device, dtype=dtype),
-                    torch.tensor([0., -s], device=device, dtype=dtype),
-                ], dim=0)[:A]
+        kp0 = keypoints
         kp = kp0.view(1,1,A,2).expand(B,T,A,2)
 
         dxdy = actions[..., :2]           # [B,T,2]
@@ -314,22 +307,22 @@ class Agent(nn.Module):
         muP = P.mean(dim=2, keepdim=True)
         muQ = Q.mean(dim=2, keepdim=True)
         X, Y = P - muP, Q - muQ
-        H00 = (X[...,0]*Y[...,0]).sum(dim=2); H01 = (X[...,0]*Y[...,1]).sum(dim=2)
-        H10 = (X[...,1]*Y[...,0]).sum(dim=2); H11 = (X[...,1]*Y[...,1]).sum(dim=2)
-        H = torch.stack([torch.stack([H00,H01],dim=-1),
-                        torch.stack([H10,H11],dim=-1)], dim=-2)        # [B,T,2,2]
+        # H00 = (X[...,0]*Y[...,0]).sum(dim=2); H01 = (X[...,0]*Y[...,1]).sum(dim=2)
+        # H10 = (X[...,1]*Y[...,0]).sum(dim=2); H11 = (X[...,1]*Y[...,1]).sum(dim=2)
+        # H = torch.stack([torch.stack([H00,H01],dim=-1),
+        #                 torch.stack([H10,H11],dim=-1)], dim=-2)        # [B,T,2,2]
+        H = torch.einsum('btai,btaj->btij', X, Y)  # [B,T,2,2]
         U, S, Vh = torch.linalg.svd(H)
-        # det correction
         Rtmp = U @ Vh
-        det  = torch.det(Rtmp)
-        sign = torch.where(det < 0, torch.tensor(-1., device=device, dtype=dtype),
-                                torch.tensor( 1., device=device, dtype=dtype))
-        Sfix = torch.diag_embed(torch.stack([torch.ones_like(sign), sign], dim=-1))  # [B,T,2,2]
+        det = torch.det(Rtmp)                             # [B,T]
+        sign = torch.where(det < 0, -torch.ones_like(det), torch.ones_like(det))
+        Sfix = torch.zeros_like(Rtmp)  # [B,T,2,2]
+        Sfix[..., 0, 0] = 1.0
+        Sfix[..., 1, 1] = sign
         R = U @ Sfix @ Vh
-
         dtheta = torch.atan2(R[...,1,0], R[...,0,0]).unsqueeze(-1)    # [B,T,1]
         # translation t = muQ - R*muP
-        Rp = torch.einsum('btij,btaj->bta i', R, muP.expand_as(P))    # [B,T,A,2]
+        Rp = torch.einsum('btij,btaj->btai', R, muP.expand_as(P))    # [B,T,A,2]
         t  = (muQ - Rp).mean(dim=2)                                   # [B,T,2]
 
         dxdy_hat = dxdy + t
