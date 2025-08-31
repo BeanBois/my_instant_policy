@@ -1,6 +1,6 @@
 import torch 
 import torch.nn as nn
-import torch.Tensor as Tensor
+from torch import Tensor
 import torch.nn.functional as F
 from utilities import se2_exp, se2_log, _wrap_to_pi
 
