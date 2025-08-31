@@ -4,12 +4,11 @@ import torch.nn as nn
 from utilities import * 
 
 # aux
-from .demo_handler import DemoHandler
 from .graph import build_local_heterodata_batch, build_action_graph_batch, build_context_graph_batch
 from .rho import Rho 
 from .psi import Psi
 from .phi import Phi
-from .action_head import ProductManifoldGPHead, SimpleActionHead
+from .action_head import SimpleActionHead
 
 
 class Policy(nn.Module):
