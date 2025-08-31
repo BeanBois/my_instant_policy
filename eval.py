@@ -30,6 +30,7 @@ def collect_demos(game_interface, num_demos, manual=True, max_demo_length = 20):
             if len(demo) > 1:
                 observations = downsample_obs(demo, max_demo_length)
                 provided_demos.append(observations)
+                game_interface.reset()
             
     else:
         demoset_id = game_interface.game.objective.value - 1
@@ -284,6 +285,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1 
+        breakpoint()
     return won 
         
 
@@ -331,7 +333,7 @@ if __name__ == "__main__":
             # num_edibles=1,
             # num_obstacles=1,
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=False, refine=10, num_demos=2), max_iter=30)
+        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=True, refine=10, num_demos=2, max_iter=30))
     print(f'Won {wins} / {num_rollouts}!')
     
 
