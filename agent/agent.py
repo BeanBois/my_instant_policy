@@ -257,10 +257,11 @@ class Agent(nn.Module):
     def _betas_lookup(self, timesteps):
         return self.betas[timesteps]
 
-    def _unnormalise_denoising_directions(self, denoising_directions_normalised):
-        
-        denoising_directions_normalised = denoising_directions_normalised[:4] * self.max_translation 
-        return denoising_directions_normalised 
+    def _unnormalise_denoising_directions(self, x):
+        # scale translation + per-node disp by length; keep state as-is
+        return torch.cat([x[..., :2] * self.max_translation,
+                        x[..., 2:4] * self.max_translation,
+                        x[..., 4:5]], dim=-1)
 
     def _rot2d(self, theta):
         c, s = torch.cos(theta), torch.sin(theta)
