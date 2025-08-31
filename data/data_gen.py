@@ -9,7 +9,7 @@ import threading
 from .pseudo_game import PseudoGame 
 from .pseudo_configs import SCREEN_HEIGHT as  PSEUDO_SCREEN_HEIGHT
 from .pseudo_configs import SCREEN_WIDTH as  PSEUDO_SCREEN_WIDTH
-import math 
+
 
 
 # TODO: 
@@ -152,178 +152,98 @@ class PseudoDemoGenerator:
             dtype=torch.float, 
             device=self.device
         )          
-        # actions = self._accumulate_actions(actions)
+        actions = self._accumulate_actions(actions)
         observations = pseudo_demo.observations
 
-        actions = self._downsample_actions_accumulate(actions)
+        actions = self._downsample_actions(actions)
         observations = self._downsample_obs(observations)
         curr_obs_set = []
         action_set = []
-        # now i want to map self.prediciton_horizon => 1 obs
-        for i in range(0, len(observations), self.pred_horizon):
-            curr_obs = observations[i]
-            curr_actions = actions[i:i + self.pred_horizon]  # Fix: start from i, take pred_horizon actions
-            if len(curr_actions) > 0:
-                curr_obs_set.append(curr_obs)
-                action_set.append(curr_actions)
 
-        # handle remainder
-        return curr_obs_set, action_set
+        D = actions.shape[-1]
+        prev_latest_abs = None  # last absolute cumulative action from previous window
 
-    # def _accumulate_actions(self, actions):
-    #     n = actions.shape[0]
-        
-    #     # Extract and reshape SE(2) matrices
-    #     se2_matrices = actions[:, :9].view(n, 3, 3)
-    #     state_actions = actions[:, 9:]
-        
-    #     # Compute cumulative matrix products
-    #     cumulative_matrices = torch.zeros_like(se2_matrices)
-    #     cumulative_matrices[0] = se2_matrices[0]
-        
-    #     for i in range(1, n):
-    #         cumulative_matrices[i] = torch.matmul(cumulative_matrices[i-1], se2_matrices[i])
-        
-    #     # Flatten back and concatenate with state actions
-    #     cumulative_se2_flat = cumulative_matrices.view(n, 9)
-    #     cumulative_actions = torch.cat([cumulative_se2_flat, state_actions], dim=1)
-        
-    #     return cumulative_actions
+        # step through ACTIONS in blocks of pred_horizon;
+        # pair obs[i] with actions[i : i+pred_horizon]
+        for i in range(0, len(actions), self.pred_horizon):
+            end = min(i + self.pred_horizon, len(actions))
 
-    # def _downsample_actions(self, actions):
-    #     """
-    #     Downsample actions to demo_length-1 items to match observations correspondence.
-    #     If observations are downsampled to demo_length, actions should be demo_length-1.
-    #     """
-    #     target_length = self.demo_length - 1  # Actions should be one less than observations
-        
-    #     if actions.shape[0] <= target_length:
-    #         return actions
-        
-    #     if target_length <= 0:
-    #         return torch.empty((0, actions.shape[1]), device=actions.device)
-        
-    #     if target_length == 1:
-    #         # If we only want 1 action, take the first one
-    #         return actions[0:1]
-        
-    #     result = torch.zeros((target_length, actions.shape[1]), device=actions.device)
-        
-    #     # Always include first action
-    #     result[0] = actions[0]
-        
-    #     if target_length > 1:
-    #         # Always include last action
-    #         result[-1] = actions[-1]
-        
-    #     # Fill in the middle actions
-    #     if target_length > 2:
-    #         for i in range(1, target_length - 1):
-    #             # Calculate position in the original sequence
-    #             pos = 1 + (i - 1) * (actions.shape[0] - 2) / (target_length - 2)
-    #             actual_index = int(round(pos))
-    #             actual_index = min(actual_index, actions.shape[0] - 1)  # Clamp to valid range
-    #             result[i] = actions[actual_index]
-        
-    #     return result
-    
-    def _compose_se2_window(self, win: torch.Tensor) -> torch.Tensor:
-        """
-        Compose a sequence of SE(2) increments (tx, ty, theta) into a single transform.
-        win: [W, 3]  (tx, ty, theta), increments applied in order.
-        Returns: [3] net (tx, ty, theta).
-        """
-        if win.numel() == 0:
-            return torch.zeros(3, dtype=win.dtype, device=win.device)
+            curr_obs = observations[i]                        # 1 obs for this window
+            curr_actions_abs = actions[i:end]                 # absolute cumulative actions in this window
 
-        # running pose
-        TX = torch.zeros(2, dtype=win.dtype, device=win.device)  # accumulated translation in world frame
-        TH = torch.zeros((), dtype=win.dtype, device=win.device) # accumulated heading (rad)
-
-        for i in range(win.shape[0]):
-            tx, ty, dth = win[i]
-            c = torch.cos(TH); s = torch.sin(TH)
-            # rotate local increment into world, then add
-            dT_world = torch.stack([c*tx - s*ty, s*tx + c*ty])
-            TX = TX + dT_world
-            TH = TH + dth
-
-        # wrap angle to [-pi, pi]
-        pi = math.pi
-        TH = (TH + pi) % (2 * pi) - pi
-        return torch.stack([TX[0], TX[1], TH])
-
-    def _downsample_actions_accumulate(self, actions: torch.Tensor, state_mode: str = "last"):
-        """
-        Downsample by composing actions inside windows.
-        actions: [N, D] with columns (tx, ty, theta, [state...])
-        Returns: [demo_length-1, D]
-        """
-        N, D = actions.shape
-        target_length = self.demo_length - 1
-        device, dtype = actions.device, actions.dtype
-
-        if target_length <= 0:
-            return torch.empty((0, D), device=device, dtype=dtype)
-        if N == 0:
-            return torch.zeros((target_length, D), device=device, dtype=dtype)
-        if N == target_length:
-            return actions  # already aligned 1:1 windows of size 1
-
-        # Window edges (inclusive-exclusive) over action indices [0..N)
-        # Use evenly spaced edges, then round to ints and fix monotonicity.
-        edges_f = torch.linspace(0, N, steps=target_length + 1, device=device)
-        edges = torch.round(edges_f).to(torch.long).clamp_(0, N)
-        # ensure strictly increasing by forcing end >= start+1 where possible
-        # If two edges collapse, we'll still produce something sensible (single best index).
-        result = torch.zeros((target_length, D), device=device, dtype=dtype)
-
-        has_state = (D >= 4)
-
-        for i in range(target_length):
-            start = edges[i].item()
-            end   = edges[i+1].item()
-
-            if end <= start:
-                # degenerate window → pick nearest valid index
-                idx = min(start, N-1)
-                net_xyz = actions[idx, :3]
-                if has_state:
-                    if state_mode == "last":
-                        st = actions[idx, 3]
-                    elif state_mode == "sum":
-                        st = actions[idx, 3]
-                    elif state_mode == "any":
-                        st = actions[idx, 3]
-                    else:
-                        st = actions[idx, 3]
-                    result[i, :3] = net_xyz
-                    result[i, 3]  = st
-                else:
-                    result[i, :3] = net_xyz
+            if curr_actions_abs.numel() == 0:
                 continue
 
-            window = actions[start:end]  # [W, D]
-            net_xyz = self._compose_se2_window(window[:, :3])  # (tx,ty,theta) composed
+            if prev_latest_abs is None:
+                # first window: relative == absolute
+                curr_actions_rel = curr_actions_abs
+            else:
+                # subtract previous window's latest *absolute* action
+                curr_actions_rel = curr_actions_abs - prev_latest_abs.view(1, D)
 
-            result[i, :3] = net_xyz
+            # IMPORTANT: update prev_latest_abs from the ORIGINAL absolute tensor
+            prev_latest_abs = curr_actions_abs[-1].detach()
 
-            if has_state:
-                if state_mode == "last":
-                    st = window[-1, 3]
-                elif state_mode == "sum":
-                    st = window[:, 3].sum().clamp(-1.0, 1.0)
-                elif state_mode == "any":
-                    # treat state as command; any nonzero -> 1
-                    st = (window[:, 3] != 0).any().to(dtype)
-                else:
-                    st = window[-1, 3]
-                result[i, 3] = st
+            curr_obs_set.append(curr_obs)
+            action_set.append(curr_actions_rel)
 
-            # If there are extra columns beyond 4, carry the last sample's values through
-            if D > 4:
-                result[i, 4:] = window[-1, 4:]
+        return curr_obs_set, action_set
 
+    def _accumulate_actions(self, actions):
+        n = actions.shape[0]
+        
+        # Extract and reshape SE(2) matrices
+        se2_matrices = actions[:, :9].view(n, 3, 3)
+        state_actions = actions[:, 9:]
+        
+        # Compute cumulative matrix products
+        cumulative_matrices = torch.zeros_like(se2_matrices)
+        cumulative_matrices[0] = se2_matrices[0]
+        
+        for i in range(1, n):
+            cumulative_matrices[i] = torch.matmul(cumulative_matrices[i-1], se2_matrices[i])
+        
+        # Flatten back and concatenate with state actions
+        cumulative_se2_flat = cumulative_matrices.view(n, 9)
+        cumulative_actions = torch.cat([cumulative_se2_flat, state_actions], dim=1)
+        
+        return cumulative_actions
+
+    def _downsample_actions(self, actions):
+        """
+        Downsample actions to demo_length-1 items to match observations correspondence.
+        If observations are downsampled to demo_length, actions should be demo_length-1.
+        """
+        target_length = self.demo_length - 1  # Actions should be one less than observations
+        
+        if actions.shape[0] <= target_length:
+            return actions
+        
+        if target_length <= 0:
+            return torch.empty((0, actions.shape[1]), device=actions.device)
+        
+        if target_length == 1:
+            # If we only want 1 action, take the first one
+            return actions[0:1]
+        
+        result = torch.zeros((target_length, actions.shape[1]), device=actions.device)
+        
+        # Always include first action
+        result[0] = actions[0]
+        
+        if target_length > 1:
+            # Always include last action
+            result[-1] = actions[-1]
+        
+        # Fill in the middle actions
+        if target_length > 2:
+            for i in range(1, target_length - 1):
+                # Calculate position in the original sequence
+                pos = 1 + (i - 1) * (actions.shape[0] - 2) / (target_length - 2)
+                actual_index = int(round(pos))
+                actual_index = min(actual_index, actions.shape[0] - 1)  # Clamp to valid range
+                result[i] = actions[actual_index]
+        
         return result
 
     def _downsample_obs(self, observations):

@@ -469,8 +469,8 @@ class TrainConfig:
     time_window: float = 1.5   # for alignment positives
     lookahead: int = 1      # next-search step size
     num_sampled_pc = 8
-    num_att_heads = 8
-    euc_head_dim = 32
+    num_att_heads = 4
+    euc_head_dim = 16
     in_dim_agent = 9
     pred_horizon = 5
     demo_length = 20

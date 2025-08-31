@@ -181,74 +181,59 @@ class Policy(nn.Module):
 
         return denoising_direction
 
-    def _perform_reverse_action(self,
-                                actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
-                                curr_object_pos: torch.Tensor, # [B, M, 2]
-                                curr_agent_info: torch.Tensor  # [B, A, 6]: [ax, ay, cos, sin, grip, state_gate?]
-                                ):
+    def _perform_reverse_action(
+        self,
+        actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
+        curr_object_pos: torch.Tensor, # [B, M, 2]
+        curr_agent_info: torch.Tensor  # [B, A, 6]: [ax, ay, cos, sin, grip, state_gate?]
+    ):
         """
-        Apply inverse SE(2) to OBJECTS sequentially over time to simulate agent motion backwards.
-        Agents do not move here (ax, ay, cos, sin stay fixed); only the gripper/state can change
-        *sequentially* based on the per-step desired command.
+        Apply inverse SE(2) to OBJECTS ONLY (non-cumulative per t).
+        Agents stay fixed in pose; per-step grip is set to the command if it differs from current.
         """
         B, T, _ = actions.shape
         _, M, _ = curr_object_pos.shape
         _, A, C = curr_agent_info.shape
         device  = curr_object_pos.device
-        dtype   = curr_object_pos.dtype
 
         # ---- split action channels ----
         dxdy   = actions[..., 0:2]            # [B,T,2]
         dtheta = actions[..., 2]              # [B,T]
         sa     = actions[..., 3].clamp(0, 1)  # [B,T] desired gripper/state command (0/1)
 
-        # ---- Prepare outputs ----
-        pred_object_pos  = torch.empty(B, T, M, 2, device=device, dtype=dtype)
-        pred_agent_info  = torch.empty(B, T, A, 6, device=device, dtype=curr_agent_info.dtype)
+        # ---- OBJECTS: inverse SE(2) per t, from the SAME base pose ----
+        # p_prev = R(dθ)^T @ (p_curr - [dx,dy])
+        dxdy_bt12 = dxdy.unsqueeze(2)                 # [B,T,1,2]
+        obj_b1m2  = curr_object_pos.unsqueeze(1)      # [B,1,M,2]
+        delta     = obj_b1m2 - dxdy_bt12              # [B,T,M,2]
 
-        # ---- Static agent info (positions/orientations & optional gate) ----
-        ax   = curr_agent_info[..., 0]  # [B,A]
-        ay   = curr_agent_info[..., 1]
-        cth  = curr_agent_info[..., 2]
-        sth  = curr_agent_info[..., 3]
-        grip = curr_agent_info[..., 4]  # this will be updated sequentially
+        c = torch.cos(dtheta).unsqueeze(-1).unsqueeze(-1)   # [B,T,1,1]
+        s = torch.sin(dtheta).unsqueeze(-1).unsqueeze(-1)
+
+        x = delta[..., 0:1]                             # [B,T,M,1]
+        y = delta[..., 1:2]
+        # R(θ)^T application:
+        x_rot =  c * x + s * y
+        y_rot = -s * x + c * y
+        pred_object_pos = torch.cat([x_rot, y_rot], dim=-1)  # [B,T,M,2]
+
+        # ---- AGENTS: positions/orientations fixed across time ----
+        ax   = curr_agent_info[..., 0].unsqueeze(1).expand(B, T, A)  # [B,T,A]
+        ay   = curr_agent_info[..., 1].unsqueeze(1).expand(B, T, A)
+        cth  = curr_agent_info[..., 2].unsqueeze(1).expand(B, T, A)
+        sth  = curr_agent_info[..., 3].unsqueeze(1).expand(B, T, A)
+        grip = curr_agent_info[..., 4].unsqueeze(1).expand(B, T, A)
+
         if C >= 6:
-            gate = curr_agent_info[..., 5]
+            gate = curr_agent_info[..., 5].unsqueeze(1).expand(B, T, A)
         else:
-            gate = torch.ones(B, A, device=device, dtype=curr_agent_info.dtype)
+            gate = torch.ones(B, T, A, device=device, dtype=curr_agent_info.dtype)
 
-        # ---- Sequential roll-back over time ----
-        # Start from the current object positions and current grip, step T times
-        pos_t   = curr_object_pos  # [B,M,2]
-        grip_t  = grip             # [B,A]
+        # Per-step grip output: set to command if different from current; otherwise keep current
+        sa_bta = sa.unsqueeze(-1).expand(B, T, A)             # [B,T,A]
+        change_mask = (sa_bta.round() != grip.round())        # bool
+        grip_out = torch.where(change_mask, sa_bta, grip)     # [B,T,A]
 
-        for t in range(T):
-            # Objects: p_{t-1} = R(-dθ_t) @ (p_t - [dx_t, dy_t])
-            dxdy_bt12 = dxdy[:, t].unsqueeze(1)          # [B,1,2] -> broadcast over M
-            delta     = pos_t - dxdy_bt12                # [B,M,2]
-
-            c = torch.cos(-dtheta[:, t]).view(B, 1, 1)   # [B,1,1]
-            s = torch.sin(-dtheta[:, t]).view(B, 1, 1)
-
-            x = delta[..., 0:1]                          # [B,M,1]
-            y = delta[..., 1:2]                          # [B,M,1]
-            x_rot =  c * x + s * y
-            y_rot = -s * x + c * y
-            pos_t = torch.cat([x_rot, y_rot], dim=-1)    # [B,M,2]
-
-            pred_object_pos[:, t] = pos_t
-
-            # Agents: sequential grip update vs last state
-            sa_t = sa[:, t].unsqueeze(-1).expand(B, A)   # [B,A]
-            change_mask = (sa_t.round() != grip_t.round())
-            grip_t = torch.where(change_mask, sa_t, grip_t)
-
-            # Pack per-t agent info (positions/orientations fixed, grip_t updated)
-            pred_agent_info[:, t, :, 0] = ax
-            pred_agent_info[:, t, :, 1] = ay
-            pred_agent_info[:, t, :, 2] = cth
-            pred_agent_info[:, t, :, 3] = sth
-            pred_agent_info[:, t, :, 4] = grip_t
-            pred_agent_info[:, t, :, 5] = gate
-
+        pred_agent_info = torch.stack([ax, ay, cth, sth, grip_out, gate], dim=-1)  # [B,T,A,6]
         return pred_object_pos, pred_agent_info
+
