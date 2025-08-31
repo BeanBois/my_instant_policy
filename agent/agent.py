@@ -40,9 +40,9 @@ class Agent(nn.Module):
                 actions,         # [B, T, 4]
                 ): 
         
-        B, _, _ = actions.shape 
+        B, T, _ = actions.shape 
         device = actions.device 
-        timesteps = torch.randint(0,self.max_diff_timesteps, (B,), device = device)
+        timesteps = torch.randint(0,self.max_diff_timesteps, (B,T), device = device)
         noisy_actions, _, _ = self.add_action_noise(actions, timesteps) # [B, T, 4]
 
         denoising_directions_normalised = self.policy(
