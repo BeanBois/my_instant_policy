@@ -2,86 +2,37 @@ import torch
 from torch import Tensor
 from typing import List, Tuple
 import math
+# SE2 Helpers
+def _wrap_to_pi(theta: Tensor) -> Tensor:
+    pi = math.pi
+    return (theta + pi) % (2 * pi) - pi
 
-# standalone functions 
-def next_proceeding_strict(curr_hyp, demo_hyp, attn_same, c, delta: int = 1, topk: int = 1):
-    """
-    curr_hyp : [B, d]
-    demo_hyp : [B, N, L, d]
-    attn_same: [B, N, L]  (same-agent Euclid attention already reduced over agents)
-    c        : Hyperbolic curvature (float)
-    delta    : step forward size (1 by default)
-    Enforces candidate indices be (n, l+delta). If l+delta >= L, they are masked out.
+def _taylor_A(w: Tensor) -> Tensor:  # sin w / w
+    w2 = w * w
+    return torch.where(w.abs() < 1e-4, 1 - w2/6 + w2*w2/120, torch.sin(w) / w)
 
-    Returns:
-      cand:    [B, topk, d]     candidate hyperbolic points
-      idx_n:   [B, topk]        demo indices
-      idx_l:   [B, topk]        time indices (already +delta)
-      weights: [B, topk]        combined score weights (for inspection)
-    """
-    B, N, L, d = demo_hyp.shape
-    assert curr_hyp.shape == (B, d), f"curr_hyp must be [B,d], got {tuple(curr_hyp.shape)}"
-    assert attn_same.shape == (B, N, L), f"attn_same must be [B,N,L], got {tuple(attn_same.shape)}"
-    device = demo_hyp.device
+def _taylor_B(w: Tensor) -> Tensor:  # (1 - cos w) / w
+    w2 = w * w
+    return torch.where(w.abs() < 1e-4, 0.5 - w2/24 + w2*w2/720, (1 - torch.cos(w)) / w)
 
-    # valid time window where l+delta < L
-    valid_L = L - delta
-    if valid_L <= 0:
-        raise ValueError(f"delta ({delta}) must be < sequence length L ({L})")
+def se2_exp(y: Tensor) -> Tensor:
+    """ y=[vx,vy,w] -> [dx,dy,theta] """
+    vx, vy, w = y.unbind(dim=-1)
+    A, B = _taylor_A(w), _taylor_B(w)
+    tx = A * vx - B * vy
+    ty = B * vx + A * vy
+    theta = _wrap_to_pi(w)
+    return torch.stack([tx, ty, theta], dim=-1)
 
-    # restrict attention and normalize over time per (B,N)
-    attn = attn_same[:, :, :valid_L]                           # [B,N,valid_L]
-    attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-8)
-
-    # candidates at (n, l+delta)
-    y = demo_hyp[:, :, delta:, :]                               # [B,N,valid_L,d]
-
-    # compare in tangent at 0
-    x_tan = logmap0(curr_hyp, c)                                # [B,d]
-    y_tan = logmap0(y, c)                                       # [B,N,valid_L,d]
-
-    # alignment score: negative squared Euclidean distance
-    diff = x_tan[:, None, None, :] - y_tan                      # [B,N,valid_L,d]
-    align = - (diff * diff).sum(dim=-1)                         # [B,N,valid_L]
-
-    # combine with attention
-    score = align * attn                                        # [B,N,valid_L]
-
-    # pick top-k across (N, valid_L)
-    score_flat = score.view(B, -1)                              # [B, N*valid_L]
-    k = min(topk, score_flat.shape[1])
-    topv, topi = torch.topk(score_flat, k=k, dim=1)             # [B,k]
-
-    idx_n = topi // valid_L                                     # [B,k]
-    idx_l = topi %  valid_L                                     # [B,k]
-
-    # gather candidates from y (still in hyperbolic space)
-    b_idx = torch.arange(B, device=device)[:, None]
-    cand  = y[b_idx, idx_n, idx_l, :]                           # [B,k,d]
-
-    # restore original timeline indices
-    idx_l = idx_l + delta
-
-    return cand, idx_n, idx_l, topv
-
-
-def time_posterior(attn_same, reduce_over_agents: bool = True):
-    """
-    attn_same: [B, A, N, L]
-    returns:
-      p_t: [B, N, L] posterior over time per demo (agent-averaged if reduce_over_agents)
-      t_soft: [B, N] expected timestep (float)
-      t_star: [B, N] argmax timestep (long)
-    """
-    if reduce_over_agents:
-        p = attn_same.mean(dim=1)  # [B,N,L]
-    else:
-        p = attn_same              # [B,A,N,L] (use a later)
-    p = p / (p.sum(dim=-1, keepdim=True) + 1e-8)
-    idx = torch.arange(p.size(-1), device=p.device).float()
-    t_soft = (p * idx).sum(dim=-1)                 # [B,N]
-    t_star = torch.argmax(p, dim=-1)               # [B,N]
-    return p, t_soft, t_star
+def se2_log(a: Tensor) -> Tensor:
+    """ a=[dx,dy,theta] -> [vx,vy,w] """
+    dx, dy, w = a.unbind(dim=-1)
+    A, B = _taylor_A(w), _taylor_B(w)
+    denom = A*A + B*B
+    invA, invB = A/denom, B/denom
+    vx =  invA * dx + invB * dy
+    vy = -invB * dx + invA * dy
+    return torch.stack([vx, vy, _wrap_to_pi(w)], dim=-1)
 
 # graph aux
 def fourier_embed_2d(delta: Tensor, num_freqs: int = 10) -> Tensor:

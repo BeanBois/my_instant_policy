@@ -1,6 +1,8 @@
 import torch 
 import torch.nn as nn
+import torch.Tensor as Tensor
 import torch.nn.functional as F
+from utilities import se2_exp, se2_log, _wrap_to_pi
 
 from .policy import Policy
 class Agent(nn.Module):
@@ -12,7 +14,7 @@ class Agent(nn.Module):
                 beta_start = 1e-4,
                 beta_end = 0.02,
                 num_att_heads = 4,
-                euc_head_dim = 32,
+                euc_head_dim = 16,
                 pred_horizon = 5,
                 in_dim_agent = 9,             
                 ):
@@ -40,9 +42,9 @@ class Agent(nn.Module):
                 actions,         # [B, T, 4]
                 ): 
         
-        B, T, _ = actions.shape 
+        B, _, _ = actions.shape 
         device = actions.device 
-        timesteps = torch.randint(0,self.max_diff_timesteps, (B,T), device = device)
+        timesteps = torch.randint(0,self.max_diff_timesteps, (B,), device = device)
         noisy_actions, _, _ = self.add_action_noise(actions, timesteps) # [B, T, 4]
 
         denoising_directions_normalised = self.policy(
@@ -57,88 +59,88 @@ class Agent(nn.Module):
         return denoising_directions, noisy_actions
 
     @torch.no_grad()
-    def plan_actions(self,
-                    curr_agent_info,   # [B,A_nodes,6]
-                    curr_object_pos,   # [B,M,2]
-                    demo_agent_info,   # [B,N,L,A_nodes,6]
-                    demo_object_pos,   # [B,N,L,M,2]
-                    T: int,            # horizon
-                    K: int = 10,       # refinement steps
-                    keypoints: torch.Tensor = None,  # [A,2] same KP set used in training loss
-                    init: str = "gauss"  # or "repeat_prev_zero"
-                    ):
+    def plan_actions(
+        self,
+        curr_agent_info: Tensor,   # [B, A, ...]
+        curr_object_pos: Tensor,   # [B, M, 2]
+        demo_agent_info: Tensor,   # [B, N, L, A, ...]
+        demo_object_pos: Tensor,   # [B, N, L, M, 2]
+        actions: Tensor = None,    # [B, T, 4] start guess; if None, zeros
+        K: int = 5,                # number of refinement/DDIM steps
+        keypoints: Tensor = None,
+        use_ddim: bool = True,
+        ddim_steps: int = None     # override number of DDIM steps; default=K
+    ) -> Tensor:
         """
-        Returns clean action sequence [B,T,4] in your (dx,dy,theta,state) parameterisation.
+        If use_ddim:
+        Interprets each refinement pass as a DDIM step in Lie-action space.
+        Uses self.alphas_cumprod (registered 1D tensor of length D) for schedule.
+        Else:
+        Falls back to your original K-pass rigid refinement.
+        Returns: [B, T, 4]
         """
         device = curr_agent_info.device
+        dtype  = curr_agent_info.dtype
         B = curr_agent_info.shape[0]
 
-        # --- initialise noisy actions x^{(0)} -----------------------------------
-        if init == "gauss":
-            dxdy = torch.randn(B, T, 2, device=device) * (self.max_translation / 10.0)
-            theta = (torch.rand(B, T, 1, device=device) - 0.5) * (2*torch.pi/6)  # ~±30°
-            state = torch.full((B,T,1), 0.5, device=device)
+        # T (horizon) from actions or model attr
+        if actions is None:
+            T = getattr(self, "pred_horizon", None)
+            assert T is not None, "Provide actions or set self.pred_horizon"
+            actions = torch.zeros(B, T, 4, device=device, dtype=dtype)
         else:
-            dxdy = torch.zeros(B, T, 2, device=device)
-            theta = torch.zeros(B, T, 1, device=device)
-            state = torch.full((B,T,1), 0.5, device=device)
+            T = actions.shape[1]
 
-        actions = torch.cat([dxdy, theta, state], dim=-1)  # [B,T,4]
+        if not use_ddim:
+            # ---- your original loop here (unchanged) ----
+            for _ in range(K):
+                denoise = self.policy(curr_agent_info, curr_object_pos,
+                                    demo_agent_info, demo_object_pos, actions)  # [B,T,A,5]
+                a_ref   = self._svd_refine_once(actions, denoise, keypoints)
+                actions = a_ref
+            actions[..., 2] = _wrap_to_pi(actions[..., 2])
+            actions[..., 3:4] = actions[..., 3:4].clamp(0.0, 1.0)
+            return actions
 
-        if keypoints is None:
-            kp = torch.tensor([(20, 0), 
-                 (-14.747874310824908, 13.509263611023021), 
-                 (-14.747874310824908, -13.509263611023021), 
-                 (0, 0)]
-                , device=device, dtype=actions.dtype
-            )  # [A,2]
-        else:
-            kp = keypoints.to(device=device, dtype=actions.dtype)  # [A,2]
-        A = kp.shape[0]
+        # ----------------- DDIM mode -----------------
+        ab = self.alphas_cumprod.to(device=device, dtype=dtype)   # [D]
+        D  = ab.numel()
+        steps = int(ddim_steps or K)
+        assert steps >= 1, "DDIM requires at least 1 step"
 
-        for _ in range(K):
-            
-            # 1) predict per-node denoising directions ε_pred: [B,T,A,5]
-            eps_pred_norm = self.policy(
-                curr_agent_info, curr_object_pos,
-                demo_agent_info, demo_object_pos,
-                actions
-            )
-            eps_pred = self._unnormalise_denoising_directions(eps_pred_norm)
+        # Build t-schedule: D-1 -> 0 in 'steps' hops
+        t_sched = torch.linspace(D - 1, 0, steps=steps + 1, device=device).round().long()  # [steps+1]
 
-            # split components
-            dt = eps_pred[..., 0:2]                   # [B,T,A,2] (same across A ideally)
-            dr = eps_pred[..., 2:4]                   # [B,T,A,2]
-            ds = eps_pred[..., 4]                     # [B,T,A]
+        # Start from current actions (interpreted as x_t); if you prefer pure noise, set actions ~ N
+        x_t = torch.cat([se2_log(actions[..., :3]), actions[..., 3:4]], dim=-1)  # [B,T,4]
 
-            # 2) Build current (noisy) node positions under actions
-            Rn = self._rot2d(actions[..., 2])         # [B,T,2,2]
-            tn = actions[..., 0:2]                    # [B,T,2]
-            Pn = torch.einsum("btij,aj->btai", Rn, kp) + tn.unsqueeze(-2)  # [B,T,A,2]
+        for s in range(steps):
+            t      = t_sched[s].item()
+            t_prev = t_sched[s + 1].item()
+            ab_t       = ab[t]
+            ab_prev    = ab[t_prev]
+            sqrt_ab_t  = ab_t.sqrt()
+            sqrt1m_t   = (1 - ab_t).clamp_min(1e-12).sqrt()
 
-            # 3) Predicted clean node positions = current + predicted residuals
-            #    also add the (shared) translation residual mean for stability
-            dt_mean = dt.mean(dim=-2)                 # [B,T,2]
-            Q = Pn + dr + dt_mean.unsqueeze(-2)       # [B,T,A,2]
+            # current noisy actions for conditioning
+            a_t = torch.cat([se2_exp(x_t[..., :3]), x_t[..., 3:4]], dim=-1)  # [B,T,4]
 
-            # 4) Recover SE(2) update via SVD (Pn -> Q)
-            R_upd, t_upd = self._svd_align_2d(Pn, Q)  # [B,T,2,2], [B,T,2]
+            # one-step denoise to get a0_hat
+            denoise = self.policy(curr_agent_info, curr_object_pos,
+                                demo_agent_info, demo_object_pos, a_t)      # [B,T,A,5]
+            a0_hat  = self._svd_refine_once(a_t, denoise, keypoints)          # [B,T,4]
+            x0_hat  = torch.cat([se2_log(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)  # [B,T,4]
 
-            # 5) Apply update to (dx,dy,theta) – left-compose
-            #    Compose angles via atan2 from R_upd
-            dth = torch.atan2(R_upd[...,1,0], R_upd[...,0,0]).unsqueeze(-1)  # [B,T,1]
-            theta = (theta + dth + torch.pi) % (2*torch.pi) - torch.pi
+            # ε̂ and DDIM update
+            eps_hat = (x_t - sqrt_ab_t * x0_hat) / (sqrt1m_t + 1e-12)
+            x_t     = ab_prev.sqrt() * x0_hat + (1 - ab_prev).clamp_min(1e-12).sqrt() * eps_hat
 
-            dxdy = dxdy + t_upd  # translation in world frame
-            actions = torch.cat([dxdy, theta, state], dim=-1)
-
-            # 6) Update gripper state with a small step & clamp
-            ds_mean = ds.mean(dim=-1, keepdim=True)   # [B,T,1]
-            state = (state + ds_mean).clamp(0., 1.)
-            actions = torch.cat([dxdy, theta, state], dim=-1)
-
-        # final clean actions
-        return actions  # [B,T,4]
+        # back to vector actions
+        a0 = se2_exp(x_t[..., :3])
+        s0 = x_t[..., 3:4].clamp(0.0, 1.0)
+        out = torch.cat([a0, s0], dim=-1)
+        out[..., 2] = _wrap_to_pi(out[..., 2])
+        return out
 
     # get unnormalised noise and project to SE(2) to add noise 
     def add_action_noise(self, actions: torch.Tensor, t: torch.Tensor):
@@ -263,33 +265,71 @@ class Agent(nn.Module):
                         x[..., 2:4] * self.max_translation,
                         x[..., 4:5]], dim=-1)
 
-    def _rot2d(self, theta):
-        c, s = torch.cos(theta), torch.sin(theta)
-        return torch.stack([torch.stack([c, -s], -1),
-                            torch.stack([s,  c], -1)], -2)  # [...,2,2]
+    def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor = None) -> Tensor:
+        """
+        actions: [B,T,4]  (dx,dy,theta,state)
+        denoise: [B,T,A,5] (tx,ty, dx_i,dy_i, ds)  -- your head’s layout
+        keypoints: [A,2] (if None, uses self.keypoints or a small cross)
+        returns: refined actions a0_hat [B,T,4]
+        """
+        device, dtype = actions.device, actions.dtype
+        B, T, _ = actions.shape
+        A = denoise.shape[2]
 
-    @torch.no_grad()
-    def _svd_align_2d(self, P, Q):
-        """
-        R,t that best aligns P->Q (Procrustes).
-        P,Q: [B,T,A,2]
-        Returns R:[B,T,2,2], t:[B,T,2]
-        """
-        muP = P.mean(dim=-2, keepdim=True)  # [B,T,1,2]
-        muQ = Q.mean(dim=-2, keepdim=True)
-        Pc, Qc = P - muP, Q - muQ
-        # H = Pc^T Qc
-        H = torch.einsum("btai,btaj->btij", Pc, Qc)  # [B,T,2,2]
+        # keypoints
+        if keypoints is None:
+            if hasattr(self, "keypoints") and self.keypoints is not None:
+                kp0 = self.keypoints.to(device=device, dtype=dtype)[:A]
+            else:
+                s = torch.tensor(1.0, device=device, dtype=dtype)
+                kp0 = torch.stack([
+                    torch.tensor([0., 0.], device=device, dtype=dtype),
+                    torch.tensor([ s, 0.], device=device, dtype=dtype),
+                    torch.tensor([-s, 0.], device=device, dtype=dtype),
+                    torch.tensor([0.,  s], device=device, dtype=dtype),
+                    torch.tensor([0., -s], device=device, dtype=dtype),
+                ], dim=0)[:A]
+        kp = kp0.view(1,1,A,2).expand(B,T,A,2)
+
+        dxdy = actions[..., :2]           # [B,T,2]
+        th   = actions[..., 2:3]          # [B,T,1]
+        st   = actions[..., 3:4]          # [B,T,1]
+
+        c = torch.cos(th); s = torch.sin(th)
+        kx, ky = kp[..., 0], kp[..., 1]
+        Rx = c * kx - s * ky
+        Ry = s * kx + c * ky
+        P  = torch.stack([Rx, Ry], dim=-1) + dxdy.unsqueeze(2)  # [B,T,A,2]
+
+        # denoise split
+        denoise = self._unnormalise_denoising_directions(denoise)  # make sure this scales tx/ty & disp
+        t_bias  = denoise[..., :2].mean(dim=2, keepdim=True)       # [B,T,1,2]
+        disp    = denoise[..., 2:4]                                # [B,T,A,2]
+        Q       = P + disp + t_bias
+
+        # Procrustes (vectorized)
+        muP = P.mean(dim=2, keepdim=True)
+        muQ = Q.mean(dim=2, keepdim=True)
+        X, Y = P - muP, Q - muQ
+        H00 = (X[...,0]*Y[...,0]).sum(dim=2); H01 = (X[...,0]*Y[...,1]).sum(dim=2)
+        H10 = (X[...,1]*Y[...,0]).sum(dim=2); H11 = (X[...,1]*Y[...,1]).sum(dim=2)
+        H = torch.stack([torch.stack([H00,H01],dim=-1),
+                        torch.stack([H10,H11],dim=-1)], dim=-2)        # [B,T,2,2]
         U, S, Vh = torch.linalg.svd(H)
-        R = torch.einsum("btik,btkj->btij", Vh, U.transpose(-2,-1))
-        # fix reflection
-        det = torch.det(R).unsqueeze(-1).unsqueeze(-1)  # [B,T,1,1]
-        Vh_fix = Vh.clone()
-        mask = (det < 0)
-        if mask.any():
-            Vh_fix[mask, :, -1] *= -1
-            R = torch.einsum("btik,btkj->btij", Vh_fix, U.transpose(-2,-1))
-        t = (muQ - torch.einsum("btij,btaj->btai", R, muP)).squeeze(-2)  # [B,T,2]
-        return R, t  # aligns P -> Q
+        # det correction
+        Rtmp = U @ Vh
+        det  = torch.det(Rtmp)
+        sign = torch.where(det < 0, torch.tensor(-1., device=device, dtype=dtype),
+                                torch.tensor( 1., device=device, dtype=dtype))
+        Sfix = torch.diag_embed(torch.stack([torch.ones_like(sign), sign], dim=-1))  # [B,T,2,2]
+        R = U @ Sfix @ Vh
 
+        dtheta = torch.atan2(R[...,1,0], R[...,0,0]).unsqueeze(-1)    # [B,T,1]
+        # translation t = muQ - R*muP
+        Rp = torch.einsum('btij,btaj->bta i', R, muP.expand_as(P))    # [B,T,A,2]
+        t  = (muQ - Rp).mean(dim=2)                                   # [B,T,2]
 
+        dxdy_hat = dxdy + t
+        th_hat   = _wrap_to_pi(th.squeeze(-1) + dtheta.squeeze(-1)).unsqueeze(-1)
+        s_hat    = (st + denoise[..., 4:5].mean(dim=2)).clamp(0.0, 1.0)
+        return torch.cat([dxdy_hat, th_hat, s_hat], dim=-1)           # [B,T,4]
