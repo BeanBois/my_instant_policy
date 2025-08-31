@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
 from utilities import se2_exp, se2_log, _wrap_to_pi
+import math
 
 from .policy import Policy
 class Agent(nn.Module):
@@ -10,6 +11,7 @@ class Agent(nn.Module):
     def __init__(self, 
                 geometric_encoder,
                 max_translation = 500,
+                max_rotation_deg = 30,
                 max_diff_timesteps = 1000,
                 beta_start = 1e-4,
                 beta_end = 0.02,
@@ -28,6 +30,7 @@ class Agent(nn.Module):
                 in_dim_agent,              
                 )
         self.max_translation = max_translation
+        self.max_rotation_rad = math.radians(max_rotation_deg)
         self.max_diff_timesteps = max_diff_timesteps
         betas = torch.linspace(beta_start, beta_end, max_diff_timesteps)  # linear; swap for cosine if you like
         self.register_buffer("betas", betas)                     # [K]
@@ -54,9 +57,9 @@ class Agent(nn.Module):
             demo_object_pos, # [B x N x L x M x 2]
             noisy_actions # [B, T, 4]
         ) # [B, T, 4, 5]
-        denoising_directions = self._unnormalise_denoising_directions(denoising_directions_normalised)
+        # denoising_directions = self._unnormalise_denoising_directions(denoising_directions_normalised)
 
-        return denoising_directions, noisy_actions
+        return denoising_directions_normalised, noisy_actions
 
     @torch.no_grad()
     def plan_actions(
@@ -262,7 +265,7 @@ class Agent(nn.Module):
     def _unnormalise_denoising_directions(self, x):
         # scale translation + per-node disp by length; keep state as-is
         return torch.cat([x[..., :2] * self.max_translation,
-                        x[..., 2:4] * self.max_translation,
+                        x[..., 2:4] * self.max_translation *torch.tensor([torch.cos(self.max_rotation_rad), torch.sin(self.max_rotation_rad)]),
                         x[..., 4:5]], dim=-1)
 
     def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor = None) -> Tensor:

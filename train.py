@@ -356,9 +356,10 @@ class PerNodeDenoisingMSELoss(nn.Module):
     loss : scalar tensor (mean MSE over B*T*A*5)
     """
 
-    def __init__(self, reduction: str = "mean"):
+    def __init__(self, pos_scale, reduction: str = "mean"):
         super().__init__()
         self.reduction = reduction
+        self.pos_scale = pos_scale
         self.mse = nn.MSELoss(reduction="mean")  # we average at the very end
 
     @staticmethod
@@ -430,19 +431,17 @@ class PerNodeDenoisingMSELoss(nn.Module):
 
         # --- Gripper state delta --------------------------------------------
         ds = (s_c - s_n)  # [B,T]
-
-        # --- Assemble GT epsilon per node -----------------------------------
         # ε*_k[node] = [Δt_x, Δt_y, Δr_x(node), Δr_y(node), Δs]
         # Broadcast translation and state deltas across nodes:
         dt = torch.stack([dt_x, dt_y], dim=-1).unsqueeze(2).expand(B, T, A, 2)  # [B,T,A,2]
         ds_exp = ds.unsqueeze(-1).unsqueeze(-1).expand(B, T, A, 1)              # [B,T,A,1]
 
         eps_gt = torch.cat([dt, dr, ds_exp], dim=-1)  # [B,T,A,5]
+        eps_gt_norm = eps_gt.clone()
+        eps_gt_norm[..., 0:4] = eps_gt_norm[..., 0:4] / self.pos_scale
 
-        # --- MSE -------------------------------------------------------------
-        # NOTE: The paper normalises components to [-1,1] during training to balance magnitudes.
-        # If you already normalise actions/flow elsewhere, plain MSE here is correct (ε-targets vs ε-preds) :contentReference[oaicite:3]{index=3}.
-        loss = self.mse(pred_eps, eps_gt)
+
+        loss = self.mse(pred_eps, eps_gt_norm)
 
         return loss
 
@@ -482,7 +481,7 @@ class TrainConfig:
     num_chosen_pc = 512
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
 
 
 
@@ -521,7 +520,7 @@ if __name__ == "__main__":
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
 
     # --- Losses
-    pnn_loss = PerNodeDenoisingMSELoss()
+    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation)
 
     # --- Optim
     optim = AdamW([p for p in agent.parameters() if p.requires_grad],
