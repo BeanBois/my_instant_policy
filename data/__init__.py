@@ -7,3 +7,4 @@ from .game_configs import PLAYER_SIZE
 
 from .interface import Game, GameInterface, GameMode
 from .game_aux import PlayerState, Action 
+from .game_obj import GameDifficulty, GameObjective

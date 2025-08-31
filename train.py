@@ -456,7 +456,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-4
     weight_decay: float = 1e-4
-    max_steps: int = 5000
+    max_steps: int = 3000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -470,7 +470,7 @@ class TrainConfig:
     lookahead: int = 1      # next-search step size
     num_sampled_pc = 8
     num_att_heads = 4
-    euc_head_dim = 16
+    euc_head_dim = 32
     in_dim_agent = 9
     pred_horizon = 5
     demo_length = 20
@@ -480,7 +480,7 @@ class TrainConfig:
     beta_end = 0.02
 
     # flags
-    train_geo_encoder = False
+    train_geo_encoder = True
 
 
 

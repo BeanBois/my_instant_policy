@@ -292,6 +292,7 @@ if __name__ == "__main__":
     from train import TrainConfig
     from agent import GeometryEncoder, Agent
     import os 
+    from data import GameObjective
 
     cfg = TrainConfig()
     geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim)
@@ -326,10 +327,11 @@ if __name__ == "__main__":
     for _ in range(num_rollouts):
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,
+            objective=GameObjective.REACH_GOAL,
             # num_edibles=1,
             # num_obstacles=1,
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=False))
+        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=False, refine=10, num_demos=2), max_iter=30)
     print(f'Won {wins} / {num_rollouts}!')
     
 

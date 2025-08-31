@@ -12,7 +12,7 @@ class Agent(nn.Module):
                 beta_start = 1e-4,
                 beta_end = 0.02,
                 num_att_heads = 4,
-                euc_head_dim = 16,
+                euc_head_dim = 32,
                 pred_horizon = 5,
                 in_dim_agent = 9,             
                 ):
