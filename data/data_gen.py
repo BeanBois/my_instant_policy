@@ -232,7 +232,7 @@ class PseudoDemoGenerator:
         Downsample observations to demo_length items.
         """
         target_length = self.demo_length
-        
+        T = len(observations)
         if len(observations) <= target_length:
             return observations
         
@@ -242,27 +242,60 @@ class PseudoDemoGenerator:
         if target_length == 1:
             # If we only want 1 observation, take the first one
             return [observations[0]]
+        gripper = np.array([1 if observations[i]['agent-state'] else 0 for i in range(T)], dtype=np.int32)
+
+        # indices where state changes (use the index of the NEW state)
+        toggles = np.nonzero(np.diff(gripper) != 0)[0] + 1    # e.g., [5, 12, ...]
+        candidates = [0, T-1] + toggles.tolist()
+        keep = sorted(set(candidates))
         
-        result = [observations[0]]  # Always include first observation
-        
-        if target_length > 1:
-            result.append(observations[-1])  # Always include last observation
-        
-        # Fill in the middle observations
-        if target_length > 2:
-            middle_indices = []
-            for i in range(1, target_length - 1):
-                # Calculate position in the original sequence
-                pos = 1 + (i - 1) * (len(observations) - 2) / (target_length - 2)
-                actual_index = int(round(pos))
-                actual_index = min(actual_index, len(observations) - 1)  # Clamp to valid range
-                middle_indices.append(actual_index)
-            
-            # Insert middle observations in the correct order
-            for i, idx in enumerate(middle_indices):
-                result.insert(i + 1, observations[idx])
-        
-        return result
+        # --- prune or pad to reach target_length ---
+        if len(keep) > target_length:
+            # too many points: keep endpoints, choose a subset of toggles uniformly
+            # separate endpoints and toggles to preserve ends
+            ends = [0, T-1]
+            toggle_only = [i for i in keep if i not in ends]
+
+            if target_length <= 2:
+                # only room for endpoints
+                chosen = ends[:target_length]
+            else:
+                k = target_length - 2
+                # pick k toggle indices uniformly spaced over toggle_only
+                # (works even if there are many toggles)
+                sel = np.round(np.linspace(0, len(toggle_only)-1, num=k)).astype(int)
+                chosen_toggles = [toggle_only[j] for j in sel]
+                chosen = sorted(set(ends + chosen_toggles))
+
+            keep = chosen
+
+        elif len(keep) < target_length:
+            # not enough points: backfill with evenly spaced frames
+            need = target_length - len(keep)
+            keep_set = set(keep)
+
+            # propose evenly spaced indices across [0, T-1]
+            # avoid endpoints because they’re already in keep
+            proposals = np.round(np.linspace(1, T-2, num=max(need*3, need))).astype(int).tolist()
+
+            # add proposals that aren’t already kept, until we reach target_length
+            for idx in proposals:
+                if idx not in keep_set:
+                    keep_set.add(int(idx))
+                    if len(keep_set) >= target_length:
+                        break
+
+            # if still short (rare), fill by linear scan
+            i = 1
+            while len(keep_set) < target_length and i < T-1:
+                if i not in keep_set:
+                    keep_set.add(i)
+                i += 1
+
+            keep = sorted(keep_set)
+
+        # --- build the result in temporal order ---
+        return [observations[i] for i in keep]
 
     def _pad_to_length(self, arr: torch.Tensor, T: int, dim: int = 0) -> torch.Tensor:
         """

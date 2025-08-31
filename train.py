@@ -161,7 +161,7 @@ class PseudoDemoDataset(Dataset):
             agent_info = torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
             agent_infos.append(agent_info)
 
-            # Object coords → pick exactly M 2D points
+            # Object coords → pick exactly M 2D points 
             coords_np = ob["coords"]  # numpy array [K,2] (possibly K != M)
             K = int(coords_np.shape[0])
             if K == 0:
@@ -479,6 +479,8 @@ class TrainConfig:
     beta_start = 1e-4
     beta_end = 0.02
 
+    num_chosen_pc = 512
+
     # flags
     train_geo_encoder = True
 
@@ -502,7 +504,7 @@ if __name__ == "__main__":
     
 
     # --- Data
-    ds = PseudoDemoDataset(B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length)
+    ds = PseudoDemoDataset(B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length, M = cfg.num_chosen_pc)
     dl = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, collate_fn=collate_items, num_workers=0)
 
     # --- Model
