@@ -151,43 +151,52 @@ class Agent(nn.Module):
         return out
 
     # get unnormalised noise and project to SE(2) to add noise 
-    def add_action_noise(self, actions: torch.Tensor, t: torch.Tensor):
+    def add_action_noise(self, actions: torch.Tensor, t_int: torch.Tensor):
         """
-        actions: [B,T,4] = (dx,dy,theta,state)
-        t:       [B,T] int diffusion step
-        returns: (noisy_actions [B,T,4], epsilon_target [B,T,3], state_eps [B,T])
-                epsilon_target is the Lie noise xi you sampled (vx,vy,omega)
+        actions: [B,T,4] = (dx,dy,theta,state)  -- clean x_0 in action space
+        t_int:   [B,T] int timesteps (0..K-1)
+        returns:
+        noisy_actions [B,T,4]  (for conditioning),
+        eps_action    [B,T,3]  (the epsilon in tangential se(2) space: vx,vy,omega),
+        eps_state     [B,T]    (epsilon for state channel)
         """
         B,T,_ = actions.shape
         dev, dt = actions.device, actions.dtype
 
-        transrot = actions[...,:3]
-        state    = actions[...,-1]
+        # --- schedules ---
+        # shape [K]; take gather with t_int to get shape [B,T]
+        ab_all = self.alphas_cumprod.to(dev, dt)                # [K]
+        ab_t   = ab_all.gather(0, t_int.reshape(-1)).reshape(B,T)  # [B,T]
+        sqrt_ab_t  = ab_t.sqrt()                                 # [B,T]
+        sqrt1m_abt = (1.0 - ab_t).clamp_min(1e-12).sqrt()       # [B,T]
 
-        # clean SE(2)
-        T_clean = self._se2_from_vec(transrot)         # [B,T,3,3]
+        # --- split action channels ---
+        transrot0 = actions[...,:3]     # (dx,dy,theta) clean x_0 in action space
+        state0    = actions[...,-1]     # clean gripper/state in [0,1] (or similar)
 
-        betas = self._betas_lookup(t).to(dev, dt)    # [B,T]
-        sigma = torch.sqrt(betas).unsqueeze(-1)      # [B,T,1]
+        # --- go to tangent: x0 = log( SE2(transrot0) ) ---
+        # x0: [B,T,3] (vx,vy,omega) representing the same SE(2) increment as (dx,dy,theta)
+        x0 = se2_log(transrot0)         # you already import se2_log
 
-        # sample Lie noise ε ~ N(0, I) then scale by σ_t
-        eps_body = torch.randn(B,T,3, device=dev, dtype=dt) * sigma  # [B,T,3]
-        Xi = self._se2_exp(eps_body)                                       # [B,T,3,3]
+        # --- sample epsilons ---
+        eps_action = torch.randn(B,T,3, device=dev, dtype=dt)   # N(0,I) in se(2)
+        eps_state  = torch.randn(B,T,  device=dev, dtype=dt)    # N(0,1)
 
-        # left-invariant noising
-        T_noisy = self._se2_compose(Xi, T_clean)                           # [B,T,3,3]
+        # --- closed-form forward: x_t = sqrt(ab)*x0 + sqrt(1-ab)*eps ---
+        x_t = sqrt_ab_t.unsqueeze(-1) * x0 + sqrt1m_abt.unsqueeze(-1) * eps_action  # [B,T,3]
 
-        noisy_vec = self._se2_to_vec(T_noisy)                               # [B,T,3]
-        # wrap angle to (-pi,pi]
-        noisy_vec[...,2] = ((noisy_vec[...,2] + torch.pi) % (2*torch.pi)) - torch.pi
+        # --- map back to action space ---
+        transrot_t = se2_exp(x_t)        # [B,T,3] => (dx,dy,theta) at step t
+        # keep theta in (-pi,pi]
+        transrot_t[...,2] = ((transrot_t[...,2] + torch.pi) % (2*torch.pi)) - torch.pi
 
-        # state/gripper channel in R
-        state_eps = torch.randn_like(state) * torch.sqrt(betas)       # [B,T]
-        state_noisy = state + state_eps
-        state_noisy = state_noisy.clamp(0.,1.)
+        # --- state diffusion in R ---
+        state_t = sqrt_ab_t * state0 + sqrt1m_abt * eps_state   # [B,T]
+        state_t = state_t.clamp(0.0, 1.0)
 
-        noisy_actions = torch.cat([noisy_vec, state_noisy.unsqueeze(-1)], dim=-1)
-        return noisy_actions, eps_body, state_eps
+        noisy_actions = torch.cat([transrot_t, state_t.unsqueeze(-1)], dim=-1)  # [B,T,4]
+        return noisy_actions, eps_action, eps_state
+
 
     def _actions_vect_to_SE2_flat(self, actions):
         # (x,y,theta_rad,state) => SE(2).flatten() | state 
@@ -267,10 +276,10 @@ class Agent(nn.Module):
     def _betas_lookup(self, timesteps):
         return self.betas[timesteps]
 
-    def _unnormalise_denoising_directions(self, x):
+    def _unnormalise_denoising_directions(self, x, kp_norms):
         # scale translation + per-node disp by length; keep state as-is
         return torch.cat([x[..., :2] * self.max_translation,
-                        x[..., 2:4] * self.max_translation,
+                        x[..., 2:4] * (self.max_rotation * kp_norms[None,None,:,None]),
                         x[..., 4:5]], dim=-1)
 
     def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor) -> Tensor:
@@ -299,7 +308,8 @@ class Agent(nn.Module):
         P  = torch.stack([Rx, Ry], dim=-1) + dxdy.unsqueeze(2)  # [B,T,A,2]
 
         # denoise split
-        denoise = self._unnormalise_denoising_directions(denoise)  # make sure this scales tx/ty & disp
+        kp_norms = kp0.norm(dim = -1)
+        denoise = self._unnormalise_denoising_directions(denoise, kp_norms)  # make sure this scales tx/ty & disp
         t_bias  = denoise[..., :2].mean(dim=2, keepdim=True)       # [B,T,1,2]
         disp    = denoise[..., 2:4]                                # [B,T,A,2]
         Q       = P + disp + t_bias
