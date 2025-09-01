@@ -445,7 +445,8 @@ class PerNodeDenoisingMSELoss(nn.Module):
         eps_gt_norm = eps_gt.clone()
         eps_gt_norm[..., 0:2] = eps_gt_norm[..., 0:2] / self.pos_scale
         kp_norms = keypoints.norm(dim = -1)
-        eps_gt_norm[..., 2:4] = eps_gt_norm[..., 2:4] / (self.rad_scale * kp_norms[None, None, :, None])
+        denom = (self.rad_scale * kp_norms).clamp_min(1)
+        eps_gt_norm[..., 2:4] = eps_gt_norm[..., 2:4] / denom[None, None, :, None]
         eps_gt_norm[torch.isnan(eps_gt_norm)] = 0
 
 
@@ -463,7 +464,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-4
     weight_decay: float = 1e-4
-    max_steps: int = 20000
+    max_steps: int = 2000000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
