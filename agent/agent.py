@@ -46,9 +46,9 @@ class Agent(nn.Module):
                 actions,         # [B, T, 4]
                 ): 
         
-        B, _, _ = actions.shape 
+        B, T, _ = actions.shape 
         device = actions.device 
-        timesteps = torch.randint(0,self.max_diff_timesteps, (B,), device = device)
+        timesteps = torch.randint(0,self.max_diff_timesteps, (B,1), device = device).repeat(1,T)
         noisy_actions, _, _ = self.add_action_noise(actions, timesteps) # [B, T, 4]
 
         denoising_directions_normalised = self.policy(
@@ -111,7 +111,7 @@ class Agent(nn.Module):
             return actions
 
         # ----------------- DDIM mode -----------------
-        ab = self.alphas_cumprod.to(device=device, dtype=dtype)   # [D]
+        ab = self.alphas_cumprod.to(device=device, dtype=dtype)   # [D]  
         D  = ab.numel()
         steps = int(ddim_steps or K)
         assert steps >= 1, "DDIM requires at least 1 step"
