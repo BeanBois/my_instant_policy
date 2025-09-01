@@ -32,6 +32,7 @@ class Agent(nn.Module):
         self.max_translation = max_translation
         self.max_rotation_rad = math.radians(max_rotation_deg)
         self.max_diff_timesteps = max_diff_timesteps
+        self.pred_horizon = pred_horizon
         betas = torch.linspace(beta_start, beta_end, max_diff_timesteps)  # linear; swap for cosine if you like
         self.register_buffer("betas", betas)                     # [K]
         alphas = 1.0 - betas
@@ -269,7 +270,7 @@ class Agent(nn.Module):
     def _unnormalise_denoising_directions(self, x):
         # scale translation + per-node disp by length; keep state as-is
         return torch.cat([x[..., :2] * self.max_translation,
-                        x[..., 2:4] * self.max_translation *torch.tensor([torch.cos(self.max_rotation_rad), torch.sin(self.max_rotation_rad)]),
+                        x[..., 2:4] * self.max_translation,
                         x[..., 4:5]], dim=-1)
 
     def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor) -> Tensor:

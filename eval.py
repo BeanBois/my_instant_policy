@@ -272,7 +272,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
             curr_object_pos = curr_object_pos,
             demo_agent_info = demo_agent_info,
             demo_object_pos = demo_object_pos,
-            T = horizon,
+            # T = horizon,
             K = refine,
             keypoints = keypoints
         )[0] # [T,4]
@@ -285,7 +285,6 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1 
-        breakpoint()
     return won 
         
 
@@ -333,7 +332,7 @@ if __name__ == "__main__":
             # num_edibles=1,
             # num_obstacles=1,
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=True, refine=10, num_demos=2, max_iter=30))
+        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=False, refine=10, num_demos=2, max_iter=30))
     print(f'Won {wins} / {num_rollouts}!')
     
 

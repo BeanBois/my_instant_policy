@@ -76,13 +76,16 @@ from data import PseudoDemoGenerator
 class PseudoDemoDataset(Dataset):
     agent_kp = PseudoDemoGenerator.agent_keypoints
     kp_order = ["front", "back-left", "back-right", "center"]
-    def __init__(self, length=10000, device="cpu",
+    def __init__(self, biased_odds, augmented_odds, length=10000, device="cpu",
                  B=4, A=4, M=64, N=2, L=10, T=8, action_dim=3):
+        self.biased_odds = biased_odds
+        self.augmeted_odds = augmented_odds 
         self.length = length
         self.device = device
         self.B, self.A, self.M, self.N, self.L, self.T = B, A, M, N, L, T
         self.action_dim = action_dim
-        self.data_gen = PseudoDemoGenerator(device, num_demos = self.N + 1, demo_length = self.L, pred_horizon = self.T)
+        self.data_gen = PseudoDemoGenerator(device, num_demos = self.N + 1, demo_length = self.L, pred_horizon = self.T,
+                                            biased_odds= biased_odds, augmented_odds=augmented_odds)
 
     def __len__(self):
         return self.length
@@ -470,7 +473,7 @@ class TrainConfig:
     lookahead: int = 1      # next-search step size
     num_sampled_pc = 8
     num_att_heads = 4
-    euc_head_dim = 16
+    euc_head_dim = 32
     in_dim_agent = 9
     pred_horizon = 5
     demo_length = 20
@@ -480,6 +483,8 @@ class TrainConfig:
     beta_end = 0.02
 
     num_chosen_pc = 512
+    biased_odds = 1.0
+    augmented_odds = 0.0
 
     # flags
     train_geo_encoder = False
@@ -504,7 +509,7 @@ if __name__ == "__main__":
     
 
     # --- Data
-    ds = PseudoDemoDataset(B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length, M = cfg.num_chosen_pc)
+    ds = PseudoDemoDataset(biased_odds=cfg.biased_odds, augmented_odds=cfg.augmented_odds, B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length, M = cfg.num_chosen_pc)
     dl = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, collate_fn=collate_items, num_workers=0)
 
     # --- Model
