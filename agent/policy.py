@@ -60,7 +60,8 @@ class Policy(nn.Module):
                 curr_object_pos, # [B x M x 2] x,y
                 demo_agent_info, # [B x N x L x self.num_agent_nodes x 6] x, y, theta, state, time, done
                 demo_object_pos, # [B x N x L x M x 2]
-                actions # [B, T, 4]
+                actions,  # [B, T, 4]
+                mode = 'train'
                 ):
         B, N, L, num_agent_nodes, agent_dim = demo_agent_info.shape
         _, _, _, num_object_nodes, obj_pos_dim = demo_object_pos.shape 
@@ -138,7 +139,12 @@ class Policy(nn.Module):
         curr_agent_emb_context_aligned_batch = curr_agent_emb_context_aligned_batch.view(-1, num_agent_nodes, self.euc_dim)       # because each graph has exactly A 'curr' nodes
        
         ############################ Then Actions ############################ 
-        pred_obj_info, pred_agent_info = self._perform_reverse_action(actions, curr_object_pos, curr_agent_info)
+        pred_obj_info = None 
+        pred_agent_info = None 
+        if mode == 'eval':
+            pred_obj_info, pred_agent_info = self._perform_reverse_action_seq(actions, curr_object_pos, curr_agent_info)
+        else:
+            pred_obj_info, pred_agent_info = self._perform_reverse_action(actions, curr_object_pos, curr_agent_info)
         
         # with pred info flatten, then make hetero graph 
         B,T,M, _ = pred_obj_info.shape  # T = self.pred_horizon
@@ -180,6 +186,78 @@ class Policy(nn.Module):
         denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
 
         return denoising_direction
+
+    def _perform_reverse_action_seq(self,
+                                actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
+                                curr_object_pos: torch.Tensor, # [B, M, 2]
+                                curr_agent_info: torch.Tensor  # [B, A, 6]: [ax, ay, cos, sin, grip, state_gate?]
+                                ):
+        """
+        Apply inverse SE(2) to OBJECTS sequentially over time to simulate agent motion backwards.
+        Agents do not move here (ax, ay, cos, sin stay fixed); only the gripper/state can change
+        *sequentially* based on the per-step desired command.
+        """
+        B, T, _ = actions.shape
+        _, M, _ = curr_object_pos.shape
+        _, A, C = curr_agent_info.shape
+        device  = curr_object_pos.device
+        dtype   = curr_object_pos.dtype
+
+        # ---- split action channels ----
+        dxdy   = actions[..., 0:2]            # [B,T,2]
+        dtheta = actions[..., 2]              # [B,T]
+        sa     = actions[..., 3].clamp(0, 1)  # [B,T] desired gripper/state command (0/1)
+
+        # ---- Prepare outputs ----
+        pred_object_pos  = torch.empty(B, T, M, 2, device=device, dtype=dtype)
+        pred_agent_info  = torch.empty(B, T, A, 6, device=device, dtype=curr_agent_info.dtype)
+
+        # ---- Static agent info (positions/orientations & optional gate) ----
+        ax   = curr_agent_info[..., 0]  # [B,A]
+        ay   = curr_agent_info[..., 1]
+        cth  = curr_agent_info[..., 2]
+        sth  = curr_agent_info[..., 3]
+        grip = curr_agent_info[..., 4]  # this will be updated sequentially
+        if C >= 6:
+            gate = curr_agent_info[..., 5]
+        else:
+            gate = torch.ones(B, A, device=device, dtype=curr_agent_info.dtype)
+
+        # ---- Sequential roll-back over time ----
+        # Start from the current object positions and current grip, step T times
+        pos_t   = curr_object_pos  # [B,M,2]
+        grip_t  = grip             # [B,A]
+
+        for t in range(T):
+            # Objects: p_{t-1} = R(-dθ_t) @ (p_t - [dx_t, dy_t])
+            dxdy_bt12 = dxdy[:, t].unsqueeze(1)          # [B,1,2] -> broadcast over M
+            delta     = pos_t - dxdy_bt12                # [B,M,2]
+
+            c = torch.cos(-dtheta[:, t]).view(B, 1, 1)   # [B,1,1]
+            s = torch.sin(-dtheta[:, t]).view(B, 1, 1)
+
+            x = delta[..., 0:1]                          # [B,M,1]
+            y = delta[..., 1:2]                          # [B,M,1]
+            x_rot =  c * x + s * y
+            y_rot = -s * x + c * y
+            pos_t = torch.cat([x_rot, y_rot], dim=-1)    # [B,M,2]
+
+            pred_object_pos[:, t] = pos_t
+
+            # Agents: sequential grip update vs last state
+            sa_t = sa[:, t].unsqueeze(-1).expand(B, A)   # [B,A]
+            change_mask = (sa_t.round() != grip_t.round())
+            grip_t = torch.where(change_mask, sa_t, grip_t)
+
+            # Pack per-t agent info (positions/orientations fixed, grip_t updated)
+            pred_agent_info[:, t, :, 0] = ax
+            pred_agent_info[:, t, :, 1] = ay
+            pred_agent_info[:, t, :, 2] = cth
+            pred_agent_info[:, t, :, 3] = sth
+            pred_agent_info[:, t, :, 4] = grip_t
+            pred_agent_info[:, t, :, 5] = gate
+
+        return pred_object_pos, pred_agent_info
 
     def _perform_reverse_action(
         self,

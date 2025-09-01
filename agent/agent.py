@@ -103,7 +103,7 @@ class Agent(nn.Module):
             # ---- your original loop here (unchanged) ----
             for _ in range(K):
                 denoise = self.policy(curr_agent_info, curr_object_pos,
-                                    demo_agent_info, demo_object_pos, actions)  # [B,T,A,5]
+                                    demo_agent_info, demo_object_pos, actions, mode='eval')  # [B,T,A,5]
                 a_ref   = self._svd_refine_once(actions, denoise, keypoints)
                 actions = a_ref
             actions[..., 2] = _wrap_to_pi(actions[..., 2])

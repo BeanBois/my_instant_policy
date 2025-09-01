@@ -239,8 +239,8 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
 
     return demo_agent_info, demo_object_pos
 
-def action_from_vec(actions): #x,y,theta,state_change [4] vector  
-    action = actions[0]
+def action_from_vec(action): #x,y,theta,state_change [4] vector  
+    action = action
     state_action = None 
     for state in PlayerState:
         if round(torch.clamp(action[-1],0,1).item()) == state.value:
@@ -276,7 +276,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
             K = refine,
             keypoints = keypoints
         )[0] # [T,4]
-        for a0 in actions:
+        for a0 in actions[0]:
             a0 = actions  
             action_obj = action_from_vec(a0)
             curr_obs = game_interface.step(action_obj)
