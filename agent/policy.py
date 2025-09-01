@@ -29,7 +29,8 @@ class Policy(nn.Module):
         self.rho = Rho(
             in_dim_agent = in_dim_agent, # default by construction, 4 onehot + 5 scalars (sin,cos,state,time,done)
             in_dim_scene = num_att_heads * euc_head_dim,     
-            edge_dim     = num_att_heads * euc_head_dim,        
+            # edge_dim     = num_att_heads * euc_head_dim, 
+            edge_dim     =  10 * 4,        
             hidden_dim   = num_att_heads * euc_head_dim,
             out_dim      = num_att_heads * euc_head_dim,
             num_layers   = 2,
@@ -87,7 +88,7 @@ class Policy(nn.Module):
             agent_pos_b = flat_demo_agent_info,
             scene_pos_b = flat_demo_scene_pos_batch,
             scene_feats_b = flat_demo_scene_feats_batch,
-            num_freqs = self.euc_dim // 4,
+            # num_freqs = self.euc_dim // 4,
             include_agent_agent = False # no agent-agent edges 
         ) # returns HeteroBatch[B*N*L]
 
@@ -112,7 +113,7 @@ class Policy(nn.Module):
             agent_pos_b = curr_agent_info,      # [B, A, 6]
             scene_pos_b = curr_scene_pos,       # [B, M, 2]
             scene_feats_b = curr_scene_feats,   # [B, M, D]
-            num_freqs = self.euc_dim //4,
+            # num_freqs = self.euc_dim //4,
             include_agent_agent=False
         )
 
@@ -165,7 +166,7 @@ class Policy(nn.Module):
             agent_pos_b = flat_pred_agent_info,
             scene_pos_b = flat_pred_scene_pos_batch,
             scene_feats_b = flat_pred_feats_batch,
-            num_freqs=self.euc_dim // 4,
+            # num_freqs=self.euc_dim // 4,
             include_agent_agent=False 
         )
 
