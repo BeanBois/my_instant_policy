@@ -360,18 +360,19 @@ class PerNodeDenoisingMSELoss(nn.Module):
     loss : scalar tensor (mean MSE over B*T*A*5)
     """
 
-    def __init__(self, pos_scale, reduction: str = "mean"):
+    def __init__(self, pos_scale, rot_scale,  reduction: str = "mean"):
         super().__init__()
         self.reduction = reduction
+        self.rad_scale = math.radians(rot_scale)
         self.pos_scale = pos_scale
-        self.mse = nn.MSELoss(reduction="mean")  # we average at the very end
+        self.mse = nn.MSELoss(reduction=reduction)  # we average at the very end
 
     @staticmethod
     def _default_keypoints(device, dtype):
         # 6 simple, centred keypoints (units arbitrary; you can swap for your real gripper KP set).
         # A small star/hex pattern gives some spread so rotation is observable.
         kp = [PseudoDemoDataset.agent_kp[k] for k in PseudoDemoDataset.kp_order]
-        pts = torch.tensor([kp], device=device, dtype=dtype)
+        pts = torch.tensor(kp, device=device, dtype=dtype)
         return pts  # [A,2]
 
     def forward(
@@ -442,7 +443,10 @@ class PerNodeDenoisingMSELoss(nn.Module):
 
         eps_gt = torch.cat([dt, dr, ds_exp], dim=-1)  # [B,T,A,5]
         eps_gt_norm = eps_gt.clone()
-        eps_gt_norm[..., 0:4] = eps_gt_norm[..., 0:4] / self.pos_scale
+        eps_gt_norm[..., 0:2] = eps_gt_norm[..., 0:2] / self.pos_scale
+        kp_norms = keypoints.norm(dim = -1)
+        eps_gt_norm[..., 2:4] = eps_gt_norm[..., 2:4] / (self.rad_scale * kp_norms[None, None, :, None])
+        eps_gt_norm[torch.isnan(eps_gt_norm)] = 0
 
 
         loss = self.mse(pred_eps, eps_gt_norm)
@@ -477,7 +481,8 @@ class TrainConfig:
     in_dim_agent = 9
     pred_horizon = 5
     demo_length = 20
-    max_translation = 100
+    max_translation = 200
+    max_rotation = 30
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
@@ -516,6 +521,7 @@ if __name__ == "__main__":
     agent = Agent(
         geometric_encoder=geometry_encoder,
         max_translation=cfg.max_translation,
+        max_rotation_deg=cfg.max_rotation,
         max_diff_timesteps=cfg.max_diffusion_steps,
         beta_start=cfg.beta_start,
         beta_end=cfg.beta_end,
@@ -526,7 +532,7 @@ if __name__ == "__main__":
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
 
     # --- Losses
-    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation)
+    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation, rot_scale=cfg.max_rotation, reduction='sum')
 
     # --- Optim
     optim = AdamW([p for p in agent.parameters() if p.requires_grad],
