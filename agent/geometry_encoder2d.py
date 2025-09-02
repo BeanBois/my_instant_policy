@@ -119,8 +119,7 @@ class Geo2DEncoder(nn.Module):
 # Public wrapper
 class GeometryEncoder(nn.Module):
     """
-    Public API used by Instant Policy code.
-    Swap 'use_pointnet' to True to revert to the (UNUSED) PointNet++ encoder below.
+    Public API
     """
     def __init__(
         self,
