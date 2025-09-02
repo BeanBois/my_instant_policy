@@ -24,7 +24,7 @@ class Psi(nn.Module):
             convs = {
                 ('curr','to','act'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
                 ('act','to','curr'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
-                ('act','temporal','act'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
+                # ('act','temporal','act'): TransformerConv((hid, hid), hid // heads, heads=heads, edge_dim=e_dim, dropout=dropout),
             }
             self.layers.append(HeteroConv(convs, aggr='sum'))
 

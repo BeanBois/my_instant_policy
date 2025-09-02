@@ -165,8 +165,8 @@ def build_context_heterodata_single(
     dst_curr = torch.arange(A).repeat(Nd)
     ei_demo_to_curr = torch.stack([src_demo, dst_curr], dim=0)
     data[('demo', 'to', 'curr')].edge_index = ei_demo_to_curr
-    # rel = data['curr'].pos[ei_demo_to_curr[1]] - data['demo'].pos[ei_demo_to_curr[0]]
-    # data[('demo','to','curr')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
+    rel = data['curr'].pos[ei_demo_to_curr[1]] - data['demo'].pos[ei_demo_to_curr[0]]
+    data[('demo','to','curr')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
 
     src_curr = torch.arange(A).repeat_interleave(Nd)
     dst_demo = torch.arange(Nd).repeat(A)
@@ -235,16 +235,16 @@ def build_action_heterodata_single(
     def act_idx(t, a):  # 0<=t<T, 0<=a<A
         return t * A + a
 
-    if T > 1:
-        src_t, dst_t = [], []
-        for a in range(A):
-            for t in range(T - 1):
-                src_t.append(act_idx(t, a))
-                dst_t.append(act_idx(t + 1, a))
-        ei_act_temporal = torch.tensor([src_t, dst_t], dtype=torch.long)
-        data[('act', 'temporal', 'act')].edge_index = ei_act_temporal
-        rel = data['act'].pos[ei_act_temporal[1]] - data['act'].pos[ei_act_temporal[0]]
-        data[('act','temporal','act')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
+    # if T > 1:
+    #     src_t, dst_t = [], []
+    #     for a in range(A):
+    #         for t in range(T - 1):
+    #             src_t.append(act_idx(t, a))
+    #             dst_t.append(act_idx(t + 1, a))
+    #     ei_act_temporal = torch.tensor([src_t, dst_t], dtype=torch.long)
+    #     data[('act', 'temporal', 'act')].edge_index = ei_act_temporal
+    #     rel = data['act'].pos[ei_act_temporal[1]] - data['act'].pos[ei_act_temporal[0]]
+    #     data[('act','temporal','act')].edge_attr = fourier_embed_2d(rel, num_freqs=num_freqs)
 
 
     Na = T * A
