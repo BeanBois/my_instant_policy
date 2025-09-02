@@ -501,7 +501,7 @@ class TrainConfig:
     augmented_odds = 0.1
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
 
 
 
