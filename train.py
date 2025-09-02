@@ -483,7 +483,7 @@ class TrainConfig:
     pred_horizon = 5
     demo_length = 20
     max_translation = 200
-    max_rotation = 30
+    max_rotation = 180
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
@@ -493,7 +493,7 @@ class TrainConfig:
     augmented_odds = 0.0
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
 
 
 
