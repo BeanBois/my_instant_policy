@@ -48,7 +48,7 @@ def _interpolate_polyline(wps_xy: np.ndarray, step_px: float) -> np.ndarray:
     out.append(wps_xy[-1][None, :])  # include last point exactly
     path = np.vstack(out)
     # round to integer grid if you keep an integer world
-    path = np.rint(path).astype(np.int32)
+    # path = np.rint(path).astype(np.int32)
     # dedupe consecutive duplicates caused by rounding
     keep = np.ones(len(path), dtype=bool)
     keep[1:] = np.any(path[1:] != path[:-1], axis=1)
@@ -103,7 +103,8 @@ class PseudoGame:
         # init game
         self.screen_width = screen_width
         self.screen_height = screen_height
-        self.screen = np.zeros([self.screen_width, self.screen_height, 3])
+        # self.screen = np.zeros([self.screen_width, self.screen_height, 3])
+        self.screen = np.zeros((self.screen_height, self.screen_width, 3), dtype=np.uint8)
         self.max_length = MAX_LENGTH
         self.min_num_sampled_waypoints = min_num_sampled_waypoints
         self.max_num_sampled_waypoints = max_num_sampled_waypoints
@@ -184,33 +185,36 @@ class PseudoGame:
         return self.actions
 
     def get_obs(self):
-        agent_pos = self._get_agent_pos()
+        agent_pos = self._get_agent_pos()      # returns world coords (you already do this)
         agent_state = self.player.state
 
-        # Since our 'point clouds' are represented as pixels in a 2d grid, our dense point cloud will be a 2d matrix of Screen-width x Screen-height
-        raw_dense_point_clouds = self._get_screen_pixels()
-        raw_coords = np.array([[(x,y) for y in range(self.screen_height) ]  for x in range(self.screen_width)])
-        
-        WHITE  = np.array([255,255,255])
-        PURPLE = np.array([128,  0,128])  # player eating
-        BLUE   = np.array([  0,  0,255])  # player not eating
+        raw_dense_point_clouds = self._get_screen_pixels()  # (H,W,3)
+        H, W = raw_dense_point_clouds.shape[:2]
+
+        # Build a grid of image coords (x_img = col, y_img = row)
+        cols, rows = np.meshgrid(np.arange(W), np.arange(H))
+        raw_coords_img = np.stack([cols, rows], axis=-1)  # (H, W, 2)
 
         is_white  = np.all(raw_dense_point_clouds == WHITE,  axis=2)
         is_purple = np.all(raw_dense_point_clouds == PURPLE, axis=2)
         is_blue   = np.all(raw_dense_point_clouds == BLUE,   axis=2)
 
         mask = ~(is_white | is_purple | is_blue)
-        valid_points = np.where(mask)
-        coords = raw_coords[valid_points]
+        r_idx, c_idx = np.where(mask)
+        coords_img = raw_coords_img[r_idx, c_idx]  # (N,2) [x_img, y_img]
+
+        # If you need world coords instead of image coords:
+        coords_world = np.array([self._img_to_world(r, c) for r, c in zip(r_idx, c_idx)])
 
         return {
-            'coords' : coords,
-            'agent-pos' : agent_pos,
+            'coords' : coords_img,                 # or coords_img if your model expects image-space
+            'agent-pos' : agent_pos,                 # world coords as before
             'agent-state' : agent_state,
-            'agent-orientation' : self.player.get_orientation('deg'),
-            'done' : self.t >= self.max_length or self.done , # wrong
+            'agent-orientation' : self.player.get_orientation('deg'),  # world angle, keep as-is
+            'done' : self.t >= self.max_length or self.done,
             'time' : self.t
         }
+
 
     def go_to_next_waypoint(self):
         idx = self._plan_idx
@@ -278,22 +282,30 @@ class PseudoGame:
             self.screen = obj.draw(self.screen)
 
         if plot:
-            for waypoint in self.waypoints:
-                center = waypoint[:-1]
-                for i in range(-2,2):
-                    for j in range(-2,2):
-                        self.screen[int(center[1]) + i, int(center[0]) + j] = [0,0,0]
+            H, W = self.screen.shape[:2]
+            for waypoint in self.plan:
+                xw, yw = float(waypoint[0]), float(waypoint[1])  # world coords
+                row, col = self._world_to_img(xw, yw)
+                for dr in range(-2, 2):
+                    for dc in range(-2, 2):
+                        r = row + dr
+                        c = col + dc
+                        if 0 <= r < H and 0 <= c < W:
+                            self.screen[r, c] = [0, 0, 0]
             self.plot_screen()
     
     def plot_screen(self):
-        # funciton is wrong oof
-        W, H = self.screen.shape[:2]
+        H, W = self.screen.shape[:2]
         plt.imshow(
             self.screen,
-            origin="lower",          # y increases upward
-            extent=[0, W, 0, H],     # x: 0→W, y: 0→H in math coords
+            origin="upper",          # top-left origin (pygame-like)
+            extent=[0, W, H, 0],     # x: 0..W, y (down): 0..H
+            interpolation="nearest",
         )
-        # plt.gca().set_aspect("equal")
+        plt.gca().set_aspect("equal")
+        plt.xlabel("x (pixels)")
+        plt.ylabel("y (pixels, down)")
+        plt.tight_layout()
         plt.show()
 
     def _get_agent_pos(self):
@@ -730,7 +742,7 @@ class PseudoGame:
 
         if self.augmented:
             waypoints_with_player_state = self._augment_waypoints(waypoints_with_player_state)
-        waypoints_with_player_state = np.rint(waypoints_with_player_state).astype(int)
+        # waypoints_with_player_state = np.rint(waypoints_with_player_state).astype(int)
         return waypoints_with_player_state
         
     def _augment_waypoints(self, waypoints_with_player_state):
@@ -833,4 +845,14 @@ class PseudoGame:
     def _end_game(self):
         return
     
+    def _world_to_img(self, x, y):
+        """World: x→right, y→up  →  Image: row (y down), col (x right)."""
+        row = int(self.screen_height - 1 - y)
+        col = int(x)
+        return row, col
 
+    def _img_to_world(self, row, col):
+        """Image (row, col) → World (x, y up)."""
+        x = float(col)
+        y = float(self.screen_height - 1 - row)
+        return x, y
