@@ -260,7 +260,7 @@ class PseudoGame:
 
         WAYPOINT_THRESHOLD = max(1.0, float(PLAYER_SIZE) * 1)
         # DEG_THRESHOLD = 5 # deg
-        HEADING_DEADBAND = 90.0  # deg
+        HEADING_DEADBAND = 30.0  # deg
         if dist <= WAYPOINT_THRESHOLD:
             self._plan_idx = idx + 1
             if self._plan_idx >= len(self.plan):
@@ -884,6 +884,21 @@ class PseudoGame:
         y = float(self.screen_height - 1 - row)
         return x, y
     
-if __name__ == "__main__":
-    pg = PseudoGame(biased=True)
-    pg.run()
+# if __name__ == "__main__":
+#     from collections import Counter
+#     c = Counter()
+#     m=1000
+#     M =0
+#     i =0 
+#     for _ in range(100):
+#         pg = PseudoGame(biased=True)
+#         pg.run()
+#         M = max(M, len(pg.observations))
+#         m = min(m, len(pg.observations))
+#         i += len(pg.observations)
+#         c[len(pg.observations)] +=1
+#     print(i/100)
+#     print('min: ', m)
+#     print('max: ', M)
+#     breakpoint()
+#     print(c)

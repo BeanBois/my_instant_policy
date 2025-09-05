@@ -276,8 +276,8 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
             K = refine,
             keypoints = keypoints
         )[0] # [T,4]
-        for a0 in actions[0]:
-            a0 = actions  
+        for a0 in actions:
+            # a0 = actions  
             action_obj = action_from_vec(a0)
             curr_obs = game_interface.step(action_obj)
             done = curr_obs['done']
@@ -285,6 +285,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1 
+            break
     return won 
         
 
@@ -296,7 +297,7 @@ if __name__ == "__main__":
     from data import GameObjective
 
     cfg = TrainConfig()
-    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim)
+    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k =256)
 
     state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
     geometry_encoder.impl.load_state_dict(state)
@@ -332,7 +333,7 @@ if __name__ == "__main__":
             # num_edibles=1,
             # num_obstacles=1,
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=False, refine=10, num_demos=2, max_iter=30))
+        wins += int(rollout_once(game_interface, agent, keypoints=kp, manual=False, refine=10, num_demos=2, max_iter=20))
     print(f'Won {wins} / {num_rollouts}!')
     
 

@@ -120,7 +120,7 @@ class Agent(nn.Module):
         t_sched = torch.linspace(D - 1, 0, steps=steps + 1, device=device).round().long()  # [steps+1]
 
         # Start from current actions (interpreted as x_t); if you prefer pure noise, set actions ~ N
-        x_t = torch.cat([se2_log(actions[..., :3]), actions[..., 3:4]], dim=-1)  # [B,T,4]
+        x_t = torch.cat([self._se2_log_cw(actions[..., :3]), actions[..., 3:4]], dim=-1)  # [B,T,4]
 
         for s in range(steps):
             t      = t_sched[s].item()
@@ -131,20 +131,20 @@ class Agent(nn.Module):
             sqrt1m_t   = (1 - ab_t).clamp_min(1e-12).sqrt()
 
             # current noisy actions for conditioning
-            a_t = torch.cat([se2_exp(x_t[..., :3]), x_t[..., 3:4]], dim=-1)  # [B,T,4]
+            a_t = torch.cat([self._se2_exp_cw(x_t[..., :3]), x_t[..., 3:4]], dim=-1)  # [B,T,4]
 
             # one-step denoise to get a0_hat
             denoise = self.policy(curr_agent_info, curr_object_pos,
                                 demo_agent_info, demo_object_pos, a_t)      # [B,T,A,5]
             a0_hat  = self._svd_refine_once(a_t, denoise, keypoints)          # [B,T,4]
-            x0_hat  = torch.cat([se2_log(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)  # [B,T,4]
+            x0_hat  = torch.cat([self._se2_log_cw(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)  # [B,T,4]
 
             # ε̂ and DDIM update
             eps_hat = (x_t - sqrt_ab_t * x0_hat) / (sqrt1m_t + 1e-12)
             x_t     = ab_prev.sqrt() * x0_hat + (1 - ab_prev).clamp_min(1e-12).sqrt() * eps_hat
 
         # back to vector actions
-        a0 = se2_exp(x_t[..., :3])
+        a0 = self._se2_exp_cw(x_t[..., :3])
         s0 = x_t[..., 3:4].clamp(0.0, 1.0)
         out = torch.cat([a0, s0], dim=-1)
         out[..., 2] = _wrap_to_pi(out[..., 2])
@@ -176,7 +176,7 @@ class Agent(nn.Module):
 
         # --- go to tangent: x0 = log( SE2(transrot0) ) ---
         # x0: [B,T,3] (vx,vy,omega) representing the same SE(2) increment as (dx,dy,theta)
-        x0 = se2_log(transrot0)         # you already import se2_log
+        x0 = self._se2_log_cw(transrot0)         # you already import se2_log
 
         # --- sample epsilons ---
         eps_action = torch.randn(B,T,3, device=dev, dtype=dt)   # N(0,I) in se(2)
@@ -186,7 +186,7 @@ class Agent(nn.Module):
         x_t = sqrt_ab_t.unsqueeze(-1) * x0 + sqrt1m_abt.unsqueeze(-1) * eps_action  # [B,T,3]
 
         # --- map back to action space ---
-        transrot_t = se2_exp(x_t)        # [B,T,3] => (dx,dy,theta) at step t
+        transrot_t = self._se2_exp_cw(x_t)        # [B,T,3] => (dx,dy,theta) at step t
         # keep theta in (-pi,pi]
         transrot_t[...,2] = ((transrot_t[...,2] + torch.pi) % (2*torch.pi)) - torch.pi
 
@@ -198,6 +198,98 @@ class Agent(nn.Module):
         return noisy_actions, eps_action, eps_state
 
 
+    def _unnormalise_denoising_directions(self, x, kp_norms):
+        # scale translation + per-node disp by length; keep state as-is
+        return torch.cat([x[..., :2] * self.max_translation,
+                        x[..., 2:4] * (self.max_rotation_rad * kp_norms[None,None,:,None]),
+                        x[..., 4:5]], dim=-1)
+
+    def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor) -> Tensor:
+        """
+        actions: [B,T,4]  (dx,dy,theta,state)
+        denoise: [B,T,A,5] (tx,ty, dx_i,dy_i, ds)  -- your head’s layout
+        keypoints: [A,2] (if None, uses self.keypoints or a small cross)
+        returns: refined actions a0_hat [B,T,4]
+        """
+        device, dtype = actions.device, actions.dtype
+        B, T, _ = actions.shape
+        A = denoise.shape[2]
+
+        # keypoints
+        kp0 = keypoints
+        kp = kp0.view(1,1,A,2).expand(B,T,A,2)
+
+        dxdy = actions[..., :2]           # [B,T,2]
+        th   = actions[..., 2:3]          # [B,T,1]
+        st   = actions[..., 3:4]          # [B,T,1]
+
+        c = torch.cos(th); s = torch.sin(th)
+        kx, ky = kp[..., 0], kp[..., 1]
+        Rx = c * kx - s * ky
+        Ry = s * kx + c * ky
+        P  = torch.stack([Rx, Ry], dim=-1) + dxdy.unsqueeze(2)  # [B,T,A,2]
+
+        # denoise split
+        kp_norms = kp0.norm(dim = -1)
+        denoise = self._unnormalise_denoising_directions(denoise, kp_norms)  # make sure this scales tx/ty & disp
+        t_bias  = denoise[..., :2].mean(dim=2, keepdim=True)       # [B,T,1,2]
+        disp    = denoise[..., 2:4]                                # [B,T,A,2]
+        Q       = P + disp + t_bias
+
+        # Procrustes (vectorized)
+        muP = P.mean(dim=2, keepdim=True)
+        muQ = Q.mean(dim=2, keepdim=True)
+        X, Y = P - muP, Q - muQ
+        # H00 = (X[...,0]*Y[...,0]).sum(dim=2); H01 = (X[...,0]*Y[...,1]).sum(dim=2)
+        # H10 = (X[...,1]*Y[...,0]).sum(dim=2); H11 = (X[...,1]*Y[...,1]).sum(dim=2)
+        # H = torch.stack([torch.stack([H00,H01],dim=-1),
+        #                 torch.stack([H10,H11],dim=-1)], dim=-2)        # [B,T,2,2]
+        H = torch.einsum('btai,btaj->btij', X, Y)  # [B,T,2,2]
+        U, S, Vh = torch.linalg.svd(H)
+        Rtmp = U @ Vh
+        det = torch.det(Rtmp)                             # [B,T]
+        sign = torch.where(det < 0, -torch.ones_like(det), torch.ones_like(det))
+        Sfix = torch.zeros_like(Rtmp)  # [B,T,2,2]
+        Sfix[..., 0, 0] = 1.0
+        Sfix[..., 1, 1] = sign
+        R = U @ Sfix @ Vh
+        dtheta = torch.atan2(R[...,1,0], R[...,0,0]).unsqueeze(-1)    # [B,T,1]
+        # translation t = muQ - R*muP
+        Rp = torch.einsum('btij,btaj->btai', R, muP.expand_as(P))    # [B,T,A,2]
+        t  = (muQ - Rp).mean(dim=2)                                   # [B,T,2]
+
+        dxdy_hat = dxdy + t
+        th_hat   = _wrap_to_pi(th.squeeze(-1) + dtheta.squeeze(-1)).unsqueeze(-1)
+        s_hat    = (st + denoise[..., 4:5].mean(dim=2)).clamp(0.0, 1.0)
+        return torch.cat([dxdy_hat, th_hat, s_hat], dim=-1)           # [B,T,4]
+
+
+    def _se2_log_cw(self, vec: torch.Tensor) -> torch.Tensor:
+        """
+        vec: [...,3] = (dx,dy,theta_CW)
+        returns twist xi_CW = (vx,vy,omega_CW)
+        Implemented by converting to CCW, calling se2_log (CCW), then converting back.
+        """
+        dx, dy, th_cw = vec[..., 0], vec[..., 1], vec[..., 2]
+        vec_ccw = torch.stack([dx, dy, -th_cw], dim=-1)
+        xi_ccw = se2_log(vec_ccw)           # your existing utility (CCW)
+        vx, vy, om_ccw = xi_ccw[..., 0], xi_ccw[..., 1], xi_ccw[..., 2]
+        xi_cw = torch.stack([vx, vy, -om_ccw], dim=-1)
+        return xi_cw
+
+    def _se2_exp_cw(self, xi: torch.Tensor) -> torch.Tensor:
+        """
+        xi: [...,3] = (vx,vy,omega_CW)
+        returns vec: (dx,dy,theta_CW)
+        Implemented via CCW exp + conversion.
+        """
+        vx, vy, om_cw = xi[..., 0], xi[..., 1], xi[..., 2]
+        xi_ccw = torch.stack([vx, vy, -om_cw], dim=-1)
+        vec_ccw = se2_exp(xi_ccw)           # your existing utility (CCW)
+        dx, dy, th_ccw = vec_ccw[..., 0], vec_ccw[..., 1], vec_ccw[..., 2]
+        vec_cw = torch.stack([dx, dy, -th_ccw], dim=-1)
+        return vec_cw
+    
     def _actions_vect_to_SE2_flat(self, actions):
         # (x,y,theta_rad,state) => SE(2).flatten() | state 
         B, T, _ = actions.shape
@@ -275,68 +367,3 @@ class Agent(nn.Module):
 
     def _betas_lookup(self, timesteps):
         return self.betas[timesteps]
-
-    def _unnormalise_denoising_directions(self, x, kp_norms):
-        # scale translation + per-node disp by length; keep state as-is
-        return torch.cat([x[..., :2] * self.max_translation,
-                        x[..., 2:4] * (self.max_rotation * kp_norms[None,None,:,None]),
-                        x[..., 4:5]], dim=-1)
-
-    def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor) -> Tensor:
-        """
-        actions: [B,T,4]  (dx,dy,theta,state)
-        denoise: [B,T,A,5] (tx,ty, dx_i,dy_i, ds)  -- your head’s layout
-        keypoints: [A,2] (if None, uses self.keypoints or a small cross)
-        returns: refined actions a0_hat [B,T,4]
-        """
-        device, dtype = actions.device, actions.dtype
-        B, T, _ = actions.shape
-        A = denoise.shape[2]
-
-        # keypoints
-        kp0 = keypoints
-        kp = kp0.view(1,1,A,2).expand(B,T,A,2)
-
-        dxdy = actions[..., :2]           # [B,T,2]
-        th   = actions[..., 2:3]          # [B,T,1]
-        st   = actions[..., 3:4]          # [B,T,1]
-
-        c = torch.cos(th); s = torch.sin(th)
-        kx, ky = kp[..., 0], kp[..., 1]
-        Rx = c * kx - s * ky
-        Ry = s * kx + c * ky
-        P  = torch.stack([Rx, Ry], dim=-1) + dxdy.unsqueeze(2)  # [B,T,A,2]
-
-        # denoise split
-        kp_norms = kp0.norm(dim = -1)
-        denoise = self._unnormalise_denoising_directions(denoise, kp_norms)  # make sure this scales tx/ty & disp
-        t_bias  = denoise[..., :2].mean(dim=2, keepdim=True)       # [B,T,1,2]
-        disp    = denoise[..., 2:4]                                # [B,T,A,2]
-        Q       = P + disp + t_bias
-
-        # Procrustes (vectorized)
-        muP = P.mean(dim=2, keepdim=True)
-        muQ = Q.mean(dim=2, keepdim=True)
-        X, Y = P - muP, Q - muQ
-        # H00 = (X[...,0]*Y[...,0]).sum(dim=2); H01 = (X[...,0]*Y[...,1]).sum(dim=2)
-        # H10 = (X[...,1]*Y[...,0]).sum(dim=2); H11 = (X[...,1]*Y[...,1]).sum(dim=2)
-        # H = torch.stack([torch.stack([H00,H01],dim=-1),
-        #                 torch.stack([H10,H11],dim=-1)], dim=-2)        # [B,T,2,2]
-        H = torch.einsum('btai,btaj->btij', X, Y)  # [B,T,2,2]
-        U, S, Vh = torch.linalg.svd(H)
-        Rtmp = U @ Vh
-        det = torch.det(Rtmp)                             # [B,T]
-        sign = torch.where(det < 0, -torch.ones_like(det), torch.ones_like(det))
-        Sfix = torch.zeros_like(Rtmp)  # [B,T,2,2]
-        Sfix[..., 0, 0] = 1.0
-        Sfix[..., 1, 1] = sign
-        R = U @ Sfix @ Vh
-        dtheta = torch.atan2(R[...,1,0], R[...,0,0]).unsqueeze(-1)    # [B,T,1]
-        # translation t = muQ - R*muP
-        Rp = torch.einsum('btij,btaj->btai', R, muP.expand_as(P))    # [B,T,A,2]
-        t  = (muQ - Rp).mean(dim=2)                                   # [B,T,2]
-
-        dxdy_hat = dxdy + t
-        th_hat   = _wrap_to_pi(th.squeeze(-1) + dtheta.squeeze(-1)).unsqueeze(-1)
-        s_hat    = (st + denoise[..., 4:5].mean(dim=2)).clamp(0.0, 1.0)
-        return torch.cat([dxdy_hat, th_hat, s_hat], dim=-1)           # [B,T,4]

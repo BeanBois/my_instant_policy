@@ -421,15 +421,24 @@ class PerNodeDenoisingMSELoss(nn.Module):
         cos_c, sin_c = torch.cos(th_c), torch.sin(th_c)
         cos_n, sin_n = torch.cos(th_n), torch.sin(th_n)
 
+        # R_c = torch.stack([
+        #     torch.stack([ cos_c, -sin_c], dim=-1),
+        #     torch.stack([ sin_c,  cos_c], dim=-1)
+        # ], dim=-2)  # [B,T,2,2]
+
+        # R_n = torch.stack([
+        #     torch.stack([ cos_n, -sin_n], dim=-1),
+        #     torch.stack([ sin_n,  cos_n], dim=-1)
+        # ], dim=-2)  # [B,T,2,2]
         R_c = torch.stack([
-            torch.stack([ cos_c, -sin_c], dim=-1),
-            torch.stack([ sin_c,  cos_c], dim=-1)
+            torch.stack([ cos_c, sin_c], dim=-1),
+            torch.stack([ -sin_c,  cos_c], dim=-1)
+        ], dim=-2)  # [B,T,2,2]
+        R_n = torch.stack([
+            torch.stack([ cos_n, sin_n], dim=-1),
+            torch.stack([ -sin_n,  cos_n], dim=-1)
         ], dim=-2)  # [B,T,2,2]
 
-        R_n = torch.stack([
-            torch.stack([ cos_n, -sin_n], dim=-1),
-            torch.stack([ sin_n,  cos_n], dim=-1)
-        ], dim=-2)  # [B,T,2,2]
 
         # Apply to keypoints
         # keypoints: [A,2] -> broadcast to [B,T,A,2]
@@ -513,7 +522,7 @@ if __name__ == "__main__":
 
     
     cfg = TrainConfig()
-    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = 128)
+    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = 256)
     if cfg.train_geo_encoder:  
         geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, save_path=f"geometry_encoder_2d")
     else:
