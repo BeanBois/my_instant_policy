@@ -120,6 +120,8 @@ class Player:
         self.x = int(self.x  + movement_vector[0] * np.cos(theta_angle))
         self.y = int(self.y +  movement_vector[0] * np.sin(theta_angle))
         
+        self.x = max(self.size, min(self.screen_width - self.size, self.x))
+        self.y = max(self.size, min(self.screen_height - self.size, self.y))       
 
         if state_change_action is not None and state_change_action != self.state: #here state change action will be represented by PlayerState
             self.alternate_state()
