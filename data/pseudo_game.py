@@ -84,7 +84,32 @@ def build_interpolated_plan(waypoints: np.ndarray, step_px: float):
     plan = np.column_stack([path_xy, state_line])
     return plan.astype(np.int32)
 
+def signed_heading_error_deg(theta_deg, px, py, tx, ty):
+    """
+    theta_deg: current heading where 0°=east, +CW (your convention)
+    (px,py):  current position in *screen coords*  (y down)
+    (tx,ty):  target position in *screen coords*   (y down)
+    returns:  smallest signed angle error in degrees, where + means "rotate CW"
+    """
+    # current heading unit vector in *screen* coords (y down)
+    th = np.deg2rad(theta_deg)
+    hx, hy = np.cos(th), np.sin(th)  # matches your move: x+=cos, y+=sin
 
+    # target direction unit vector in *screen* coords
+    dx, dy = (tx - px), (ty - py)
+    n = np.hypot(dx, dy)
+    if n < 1e-6:
+        return 0.0
+    txu, tyu = dx / n, dy / n
+
+    # signed angle from heading->target:
+    # +atan2(cross, dot). With y-down, this yields + for CW rotations
+    cross = hx * tyu - hy * txu   # z-component of 2D cross
+    dot   = hx * txu + hy * tyu
+    err_rad = np.arctan2(cross, dot)   # in radians
+    err_deg = np.degrees(err_rad)      # range (-180, 180]
+
+    return float(err_deg)
 class PseudoGame:
     agent_keypoints = PseudoPlayer(100,100).get_keypoints(frame='self')
     
@@ -242,10 +267,11 @@ class PseudoGame:
                 self.done = True
             return
 
-        goal_bearing = float(np.degrees(np.arctan2(dy, dx)))
-        err = goal_bearing - theta_deg
-        while err > 180.0:  err -= 360.0
-        while err < -180.0: err += 360.0
+        # goal_bearing = float(np.degrees(np.arctan2(dy, dx)))
+        # err = goal_bearing - theta_deg
+        # while err > 180.0:  err -= 360.0
+        # while err < -180.0: err += 360.0
+        err = signed_heading_error_deg(theta_deg, px, py, target[0], target[1])
         if abs(err) > HEADING_DEADBAND:
             rotation_cmd = float(np.clip(err, -MAX_ROTATION, MAX_ROTATION))
             action = Action(forward_movement=0.0, rotation_deg=rotation_cmd, state_change=state_change)
