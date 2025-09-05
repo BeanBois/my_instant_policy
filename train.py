@@ -481,7 +481,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-6
     weight_decay: float = 1e-4
-    max_steps: int = 1000000
+    max_steps: int = 10000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -499,8 +499,8 @@ class TrainConfig:
     in_dim_agent = 9
     pred_horizon = 5
     demo_length = 20
-    max_translation = 200
-    max_rotation = 180
+    max_translation = 100
+    max_rotation = 100
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
@@ -510,8 +510,9 @@ class TrainConfig:
     augmented_odds = 0.1
 
     # flags
-    train_geo_encoder = False
+    train_geo_encoder = True
     num_demos_given = 1
+    k_neighbours = 256
 
 
 
@@ -522,9 +523,10 @@ if __name__ == "__main__":
 
     
     cfg = TrainConfig()
-    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = 256)
+    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = cfg.k_neighbours)
     if cfg.train_geo_encoder:  
-        geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, save_path=f"geometry_encoder_2d")
+        geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, save_path=f"geometry_encoder_2d"
+        , k_neighbours=cfg.k_neighbours, num_epochs=100)
     else:
         state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
         geometry_encoder.impl.load_state_dict(state)
