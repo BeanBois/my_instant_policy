@@ -260,17 +260,32 @@ class PseudoGame:
 
         WAYPOINT_THRESHOLD = max(1.0, float(PLAYER_SIZE) * 1)
         # DEG_THRESHOLD = 5 # deg
-        HEADING_DEADBAND = 30.0  # deg
         if dist <= WAYPOINT_THRESHOLD:
             self._plan_idx = idx + 1
             if self._plan_idx >= len(self.plan):
                 self.done = True
             return
 
-        # goal_bearing = float(np.degrees(np.arctan2(dy, dx)))
-        # err = goal_bearing - theta_deg
-        # while err > 180.0:  err -= 360.0
-        # while err < -180.0: err += 360.0
+        def wrap180(a):
+            return ((a + 180.0) % 360.0) - 180.0
+
+        err = signed_heading_error_deg(theta_deg, px, py, target[0], target[1])
+        HEADING_DEADBAND = 45.0  # deg
+        REVERSE_THRESHOLD  = 120.0 
+        if abs(err) >= REVERSE_THRESHOLD:
+
+            err_back = wrap180(err + 180.0)  # error if our rear were the "front"
+            align = max(0.0, np.cos(np.radians(err_back)))  # 1 when perfectly aligned
+            forward_cmd = float(-min(dist, MAX_FORWARD_DIST) * align)  # NEGATIVE = reverse
+            rotation_cmd = float(np.clip(err_back, -MAX_ROTATION, MAX_ROTATION))
+
+            action = Action(forward_movement=forward_cmd,
+                            rotation_deg=rotation_cmd,
+                            state_change=state_change)
+            self.player.move_with_action(action)
+            self.actions.append(action)
+            return
+
         err = signed_heading_error_deg(theta_deg, px, py, target[0], target[1])
         if abs(err) > HEADING_DEADBAND:
             rotation_cmd = float(np.clip(err, -MAX_ROTATION, MAX_ROTATION))
