@@ -511,9 +511,10 @@ class TrainConfig:
 
     # flags
     train_geo_encoder = False
-    num_demos_given = 1
-    k_neighbours = 256
-
+    num_demos_given = 2
+    k_neighbours = 8
+    continue_training = False
+    offset = 0 
 
 
 if __name__ == "__main__":
@@ -526,10 +527,11 @@ if __name__ == "__main__":
     geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = cfg.k_neighbours)
     if cfg.train_geo_encoder:  
         geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, save_path=f"geometry_encoder_2d"
-        , k_neighbours=cfg.k_neighbours, num_epochs=100)
+        , k_neighbours=cfg.k_neighbours, num_epochs=20, num_samples=1000)
     else:
         state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
         geometry_encoder.impl.load_state_dict(state)
+        geometry_encoder.eval()
     os.makedirs(cfg.out_dir, exist_ok=True)
     
 
@@ -551,6 +553,10 @@ if __name__ == "__main__":
         in_dim_agent=cfg.in_dim_agent,
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
 
+    
+    if cfg.continue_training:
+        agent_state_dict = torch.load('agent.pth', map_location="cpu")['model']
+        agent.load_state_dict(agent_state_dict)
     # --- Losses
     pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation, rot_scale=cfg.max_rotation, reduction='sum')
 
@@ -626,7 +632,7 @@ if __name__ == "__main__":
                     "optim": optim.state_dict(),
                     "cfg": cfg.__dict__,
                 }
-                path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pth")
+                path = os.path.join(cfg.out_dir, f"ckpt_{(step+ cfg.offset):07d}.pth")
                 torch.save(ckpt, path)
                 print(f"Saved checkpoint to {path}")
     np.save('model_losses',avg_losses)
