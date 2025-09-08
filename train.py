@@ -513,8 +513,8 @@ class TrainConfig:
     train_geo_encoder = False
     num_demos_given = 2
     k_neighbours = 8
-    continue_training = False
-    offset = 0 
+    continue_training = True
+    offset = 10000
 
 
 if __name__ == "__main__":
